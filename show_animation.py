@@ -1,14 +1,17 @@
-import matplotlib.pyplot as plt
-import matplotlib.cm as cm
-import matplotlib.animation as animation
+import cv2
+import os
 
-img = [] # some array of images
-frames = [] # for storing the generated images
-fig = plt.figure()
-for i in range(6):
-    frames.append([plt.imshow(img[i], cmap=cm.Greys_r,animated=True)])
+image_folder = 'animation_plot'
+video_name = 'video.avi'
 
-ani = animation.ArtistAnimation(fig, frames, interval=50, blit=True,
-                                repeat_delay=1000)
-# ani.save('movie.mp4')
-plt.show()
+images = [img for img in os.listdir(image_folder) if img.endswith(".png")]
+frame = cv2.imread(os.path.join(image_folder, images[0]))
+height, width, layers = frame.shape
+
+video = cv2.VideoWriter(video_name, 0, 1, (width,height))
+
+for image in images:
+    video.write(cv2.imread(os.path.join(image_folder, image)))
+
+cv2.destroyAllWindows()
+video.release()

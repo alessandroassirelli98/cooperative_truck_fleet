@@ -1,5 +1,7 @@
 import numpy as np
 
+animate = False
+
 kp_pos = 10
 kd_pos = 0
 ki_pos = 0
@@ -14,9 +16,8 @@ kdd = 0
 
 tau = 0.1
 
+h = 0.3
+r = 30
 
-h = 0.7
-r = 10
-
-v_max = 30
-a_max = 3
+v_max = 40
+a_max = 60

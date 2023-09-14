@@ -48,7 +48,7 @@ class Vehicle:
         self.e3 = front_vehicle.a - self.a - (1/conf.tau * (- self.a + self.u) * self.h)
 
         if conf.h!=0:
-            self.u += 1/self.h * ( - self.u + conf.kp*self.e1 + conf.kd*self.e2 + conf.kdd*self.e3) * dt
+            self.u += 1/self.h * ( - self.u + conf.kp*self.e1 + conf.kd*self.e2 + conf.kdd*self.e3 + front_vehicle.u) * dt
         # else:
         #     self.u = (conf.kp*self.e1 + conf.kd*self.e2 + conf.kdd*self.e3  + front_vehicle.u) 
         self.omega = 0
