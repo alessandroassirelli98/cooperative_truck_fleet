@@ -6,9 +6,9 @@ from vehicle import Vehicle
 import conf
 plt.style.use('seaborn')
 
-street = Street(0, 0, 100, 0)
+street = Street(0, 0, 1000, 0)
 lanes = street.lanes
-n_vehicles = 10
+n_vehicles = 1
 
 vehicles_list = [Vehicle(street, lanes[0], 10, 00, L=3)]
 [vehicles_list.append(Vehicle(street, lanes[0], vehicles_list[i].s - conf.r/2, 0, L=3)) for i in range(n_vehicles-1)]
@@ -41,6 +41,9 @@ if __name__ == '__main__':
             for i, v in enumerate(platoon_vehicles[l]):
                 if i == 0:
                     v.u = u_first_vehicle[t]
+                
+                if t>20:
+                   v.change_lane(lanes[1])
                     # if t < int(N/8):
                     #     # v.set_desired_velocities(10, 0, dt)
                     #     v.u = 2

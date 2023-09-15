@@ -1,7 +1,7 @@
 import numpy as np
 
 class Street:
-    def __init__(self, x_start, y_start, x_end, y_end, n_lanes=2, lane_width=20):
+    def __init__(self, x_start, y_start, x_end, y_end, n_lanes=2, lane_width=5):
         self.x_start = x_start
         self.y_start = y_start
         self.x_end = x_end
