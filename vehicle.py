@@ -42,15 +42,15 @@ class Vehicle:
         self.log_e = []
 
 
-    def track_front_vehicle(self, front_vehicle, dt):
+    def track_front_vehicle(self, front_vehicle, dt, use_velocity_info = True):
         self.e1 = front_vehicle.s - self.s - self.r - self.h * self.v
         self.e2 = front_vehicle.v - self.v - self.h * self.a
         self.e3 = front_vehicle.a - self.a - (1/conf.tau * (- self.a + self.u) * self.h)
 
-        if conf.h!=0:
+        if use_velocity_info:
             self.u += 1/self.h * ( - self.u + conf.kp*self.e1 + conf.kd*self.e2 + conf.kdd*self.e3 + front_vehicle.u) * dt
-        # else:
-        #     self.u = (conf.kp*self.e1 + conf.kd*self.e2 + conf.kdd*self.e3  + front_vehicle.u) 
+        else:
+            self.u += 1/self.h * ( - self.u + conf.kp*self.e1 + conf.kd*self.e2 + conf.kdd*self.e3) * dt
         self.omega = 0
     
     def set_desired_velocities(self, v_des, omega_des, dt):
