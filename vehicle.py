@@ -47,7 +47,7 @@ class Vehicle:
         self.log_v = []
         self.log_e = []
         self.log_path = []
-        self.log_xy = []
+        self.log_xydelta = []
 
 
     def track_front_vehicle(self, front_vehicle, dt, use_velocity_info = True):
@@ -66,7 +66,7 @@ class Vehicle:
 
     def change_lane(self, lane: Lane):
         self.lane = lane
-        x_target = self.x + 1/np.tan(np.pi/4) + self.street.lane_width
+        x_target = self.x + 1/np.tan(np.pi/10) + self.street.lane_width
         y_target = lane.y_start
         self.path = np.array([[self.x, self.y], [x_target, y_target], [lane.x_end, lane.y_end]])
 
@@ -99,4 +99,4 @@ class Vehicle:
         self.log_v.append(self.v)
         self.log_e.append(self.e1)
         self.log_path.append(self.path)
-        self.log_xy.append([self.x, self.y])
+        self.log_xydelta.append([self.x, self.y, self.delta])
