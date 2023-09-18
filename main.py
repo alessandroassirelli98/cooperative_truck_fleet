@@ -8,7 +8,7 @@ plt.style.use('seaborn')
 
 street = Street(0, 0, 1000, 0)
 lanes = street.lanes
-n_vehicles = 1
+n_vehicles = 10
 
 vehicles_list = [Vehicle(street, lanes[0], 10, 00, L=3)]
 [vehicles_list.append(Vehicle(street, lanes[0], vehicles_list[i].s - conf.r/2, 0, L=3)) for i in range(n_vehicles-1)]
@@ -30,36 +30,29 @@ def update_platoon_order(vehicles_list):
                 platoon_vehicles[l].append(v)
         platoon_vehicles[l].sort(key=lambda x: x.s, reverse=True)
         if platoon_vehicles[l] != [] : platoon_vehicles[l][0].leader = True 
-        return platoon_vehicles
+    return platoon_vehicles
 
 
 if __name__ == '__main__':
+    overtake = False
+    overtaking_vehicle = vehicles_list[4]
     plt.figure()
     for t in range(N):
         platoon_vehicles = update_platoon_order(vehicles_list)
         for l in platoon_vehicles.keys():
             for i, v in enumerate(platoon_vehicles[l]):
                 if i == 0:
-                    v.u = u_first_vehicle[t]
-                
-                if t>20:
-                   v.change_lane(lanes[1])
-                    # if t < int(N/8):
-                    #     # v.set_desired_velocities(10, 0, dt)
-                    #     v.u = 2
-                    # elif t <= int(N* 2/8):
-                    #     v.u = -2
-                    # elif t <= int(N* 3/8):
-                    #     v.u = 2
-                    # elif t <= int(N* 4/8):
-                    #     v.u = -2
-                    # elif t <= int(N* 5/8):
-                    #     v.u = 2
-                        # v.set_desired_velocities(0, 0, dt)
-                    # else:
-                    #     v.set_desired_velocities(10, 0, dt)                    
-                    
-                else:
+                    v.set_desired_velocities(10, dt)
+
+                if v==overtaking_vehicle and t*dt > 10:
+                    v.change_lane(lanes[1])
+                    v.set_desired_velocities(20, dt)
+
+                    if v.s > 30 + platoon_vehicles[lanes[0]][0].s:
+                        v.change_lane(lanes[0])
+                        v.set_desired_velocities(10, dt)
+                        overtaking_vehicle = None
+                if i != 0:
                     v.track_front_vehicle(platoon_vehicles[l][i-1], dt, use_velocity_info = True) # follow vehicle in front
                 v.update(dt)
                 if conf.animate: plt.plot(v.x, v.y, 'bo')
@@ -113,5 +106,12 @@ if __name__ == '__main__':
         plt.plot(times, log_e[i])
     plt.legend(legend)
     
+    plt.figure()
+    plt.title('xy_pos')
+    log_xy = [v.log_xy for v in vehicles_list]
+    log_xy = np.array(log_xy)
+    for i  in range(n_vehicles):
+        plt.plot(log_xy[i, :, 0], log_xy[i, :, 1])
+    plt.legend(legend)
 
     plt.show()
