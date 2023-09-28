@@ -10,6 +10,8 @@ class Street:
         self.lane_width = lane_width
         self.length = np.sqrt((x_end - x_start)**2 + (y_end - y_start)**2)
         self.angle = np.arctan2(y_end - y_start, x_end - x_start)
+        self.R01 = np.matrix([[np.cos(self.angle), -np.sin(self.angle)], [np.sin(self.angle), np.cos(self.angle)]])
+        self.R10 = self.R01.T
 
         self.init_lanes()
 

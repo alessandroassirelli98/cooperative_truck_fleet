@@ -23,20 +23,17 @@ r = 30
 v_max = 40
 a_max = 60
 
-sigma_street_angle = 1e-5
-Q = np.asarray(np.matrix([[1, 0], [0, 1]])) * 1e-2
-R = np.eye(6) * 1e-2
+### Measurement uncertainties
+sigma_y = 1e-1
+sigma_delta = 1e-1
+sigma_alpha = 1e-2
+sigma_v = 1e-1
+sigma_a = 1e-1
+sigma_mag = 1e-1
+sigma_beta = 1e-2
+sigma_x_gps = 1e-1
+sigma_y_gps = 1e-1
+sigma_radar = 1e-1
 
 
-# Generate H matrix according to the available sensors
-H_ = [np.matrix([[1,0,0,0,0,0], [1,0,0,0,0,0]]), # H_GPS
-    np.matrix([[0,0,1,0,0,0]]), # H_MAGNETOMETER
-    np.matrix([[0,0,0,1,0,0]]), # H_STEER_ENCODER
-    np.matrix([[0,0,0,0,1,0]]), # H_WHEEL_ENCODER
-    np.matrix([[0,0,0,0,0,1]]) # H_IMU
-]
-
-H = np.asarray(np.concatenate(H_, axis=0))
-
-R = R**2
-sigma_u = 1e0
+Q = np.asarray(np.matrix([[1, 0], [0, 1]])) * 1e0
