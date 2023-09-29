@@ -9,7 +9,7 @@ plt.style.use('seaborn')
 
 street = Street(0, 0, 1000, 100)
 lanes = street.lanes
-n_vehicles = 5
+n_vehicles = 2
 
 dt = 0.01
 T = 50
@@ -21,6 +21,7 @@ vehicles_list = [Vehicle(street, lanes[0], 10, 0, dt, N+1, L=3)]
 
 def update_platoon_order(vehicles_list):
     platoon_vehicles = {}
+
     for l in lanes:
         platoon_vehicles[l] = []
         for v in vehicles_list:
@@ -56,8 +57,8 @@ if __name__ == '__main__':
         for l in platoon_vehicles.keys():
             for i, v in enumerate(platoon_vehicles[l]):
                 if i == 0:
-                    #v.set_desired_velocities(10)
-                    v.u = u_first_vehicle[t]
+                    # v.set_desired_velocities(10)
+                    v.u_fwd = u_first_vehicle[t]
                 # if t*dt > 10 and not overtake:
                 #     v.change_lane(lanes[1])
                 #     v.set_desired_velocities(10)

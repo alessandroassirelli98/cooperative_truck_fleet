@@ -15,7 +15,6 @@ class Vehicle:
         self.steer_control = PPC()
         self.steer_control.lookAheadDistance = 20
 
-
         self.dt = dt
         self.street = street
         self.lane = lane
@@ -25,7 +24,9 @@ class Vehicle:
         self.v = v
         self.omega = 0
         self.a = 0
-        self.u = 0
+        self.u_fwd = 0
+        self.u = np.array([self.u_fwd, self.omega])
+        
 
         self.S0 = np.array([self.x, self.y, self.delta, self.alpha, v, self.a])
         self.S = self.S0
@@ -94,8 +95,10 @@ class Vehicle:
             conf.sigma_x_gps**2 + conf.sigma_y_gps**2,
             conf.sigma_radar**2
             ])
-
-        
+        self.Q = conf.Q       
+        self.nu = np.random.multivariate_normal([0, 0], self.Q, N).T
+        self.eps = np.random.multivariate_normal(np.zeros(self.R.shape[0]), self.R, N).T
+        self.u_unc = self.u + self.nu[:, 0]
 
         self.estimator = Estimator(self, dt, N)
         
@@ -120,6 +123,7 @@ class Vehicle:
         self.cnt = 0
 
         self.log_u = []
+        self.log_u_unc = []
         self.log_x = []
         self.log_x_true = []
         self.log_v = []
@@ -132,22 +136,22 @@ class Vehicle:
     def track_front_vehicle(self, front_vehicle, use_velocity_info = True):
         self.e1 = front_vehicle.x - self.x - self.r - conf.h * self.v
         self.e2 = front_vehicle.v - self.v - conf.h * self.a
-        self.e3 = front_vehicle.a - self.a - (1/conf.tau * (- self.a + self.u) * conf.h)
+        self.e3 = front_vehicle.a - self.a - (1/conf.tau * (- self.a + self.u_fwd) * conf.h)
 
         if use_velocity_info:
-            self.u += 1/conf.h * ( - self.u + self.estimator.nu[0, self.cnt] + 
+            self.u_fwd += 1/conf.h * ( - self.u_fwd + 
                                   conf.kp*self.e1 + 
                                   conf.kd*self.e2 + 
                                   conf.kdd*self.e3 + 
-                                  front_vehicle.u - front_vehicle.estimator.nu[0, self.cnt]) * self.dt
+                                  front_vehicle.u_fwd) * self.dt
         else:
-            self.u += 1/conf.h * ( - self.u + conf.kp*self.e1 + conf.kd*self.e2 + conf.kdd*self.e3) * self.dt
+            self.u_fwd += 1/conf.h * ( - self.u + conf.kp*self.e1 + conf.kd*self.e2 + conf.kdd*self.e3) * self.dt
         self.omega = 0  
 
-        
+
 
     def set_desired_velocities(self, v_des):
-        self.u = self.pid_vel.compute(v_des - self.v, self.dt)
+        self.u_fwd = self.pid_vel.compute(v_des - self.v, self.dt)
 
     def change_lane(self, lane: Lane):
         self.lane = lane
@@ -165,11 +169,12 @@ class Vehicle:
         alpha_des = self.steer_control.ComputeSteeringAngle(self.path, xy_position, self.delta, self.L)
         self.omega = self.pid_steer.compute(alpha_des - self.alpha, self.dt)  # Compute steering angle acceleration
 
-        u = np.array([self.u, 0])
+        self.u = np.array([self.u_fwd, 0])
+        self.u_unc = self.u + self.nu[:, self.cnt].T
 
-        self.estimator.run_filter(u, self.cnt)
+        self.estimator.run_filter(self.u_unc, self.cnt)
 
-        self.S = self.f_fun(self.S, u, [0,0])
+        self.S = self.f_fun(self.S, self.u, [0,0])
         self.S = self.S.full().flatten() # Convert to numpy array
         self.S[5] = np.clip(self.S[5], -self.a_max, self.a_max) # Clip acceleration
 
@@ -182,6 +187,7 @@ class Vehicle:
         self.a = self.estimator.S_hat[5, self.cnt + 1]
         
         self.log_u.append(self.u)
+        self.log_u_unc.append(self.u_unc)
         self.log_x.append(self.x)
         self.log_x_true.append(self.S[0])
         self.log_v.append(self.v)

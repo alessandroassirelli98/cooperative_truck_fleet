@@ -21,7 +21,7 @@ class Estimator:
         self.G_fun = cas.Function('G_fun', [S, U], [G])
         self.update_sensor_set() # Compute H matrix according to the available sensors
 
-        self.Q = conf.Q
+        self.Q = vehicle.Q
         self.R = vehicle.R
         
         S0_hat = vehicle.S0 * 0
@@ -32,8 +32,7 @@ class Estimator:
         self.P[:,:,0] = np.eye(self.n) * 1e0
         self.S_hat[:,0] = S0_hat
 
-        self.nu = np.random.multivariate_normal([0, 0], self.Q, N).T
-        self.eps = np.random.multivariate_normal(np.zeros(self.R.shape[0]), self.R, N).T
+        
 
     def update_sensor_set(self):
         H = cas.jacobian(self.vehicle.h, self.vehicle.S_sym)
@@ -47,7 +46,7 @@ class Estimator:
         A = self.A_fun(self.S_hat[:,i], u).full()
     
         # Prediction step
-        self.S_hat[:,i+1] = self.vehicle.f_fun(self.S_hat[:,i], u, self.nu[:,i]).full().flatten()
+        self.S_hat[:,i+1] = self.vehicle.f_fun(self.S_hat[:,i], u, [0,0]).full().flatten()
         self.P[:,:, i+1] = A @ self.P[:,:,i] @ A.T + G @ self.Q @ G.T
 
         # Update step
@@ -62,7 +61,7 @@ class Estimator:
         #             self.vehicle.S[0]*np.sin(self.vehicle.street.angle) + self.vehicle.S[1]*np.cos(self.vehicle.street.angle)
         #             ]) + self.eps[:,i] # Measurement Simulation
         
-        z = self.h_fun(self.vehicle.S).full().flatten() + self.eps[:,i] # Measurement Simulation
+        z = self.h_fun(self.vehicle.S).full().flatten() + self.vehicle.eps[:,i] # Measurement Simulation
 
         S = H @ self.P[:,:,i+1] @ H.T + self.R
         w = self.P[:,:,i+1] @ H.T @ np.linalg.inv(S)
