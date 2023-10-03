@@ -1,6 +1,6 @@
 import numpy as np
 
-animate = False
+animate = True
 
 kp_pos = 5
 kd_pos = 0.5
@@ -26,12 +26,12 @@ a_max = 60
 comm_range = 100
 
 ### Measurement uncertainties
-sigma_y = 1e-1
-sigma_delta = 1e-1
+sigma_y = 1e-2
+sigma_delta = 1e-2
 sigma_alpha = 1e-2
 sigma_v = 1e-1
 sigma_a = 1e-1
-sigma_mag = 1e-1
+sigma_mag = 1e-2
 sigma_beta = 1e-2
 sigma_x_gps = 1e-1
 sigma_y_gps = 1e-1

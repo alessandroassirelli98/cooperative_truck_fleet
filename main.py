@@ -7,7 +7,7 @@ import conf
 plt.style.use('seaborn')
 
 
-street = Street(0, 0, 5000, 100)
+street = Street(0, 0, 100, 100)
 lanes = street.lanes
 n_vehicles = 5
 
@@ -16,21 +16,24 @@ T = 150
 N = int(T/dt)
 
 vehicles_list = [Vehicle(street, lanes[0], 20, 20, dt, N+1, L=3)]
-[vehicles_list.append(Vehicle(street, lanes[0], vehicles_list[i].x - conf.r/2, 0, dt, N+1, L=3)) for i in range(n_vehicles-1)]
+vehicles_list[0].status = [100, 2, 1, 20]
+[vehicles_list.append(Vehicle(street, lanes[0], vehicles_list[i].x - conf.r/2, 20, dt, N+1, L=3)) for i in range(n_vehicles-1)]
 
 
 def update_platoon_order(vehicles_list):
-    platoon_vehicles = {}
-
-    for l in lanes:
-        platoon_vehicles[l] = []
-        for v in vehicles_list:
-            if v.lane == l:
-                platoon_vehicles[l].append(v)
-        platoon_vehicles[l].sort(key=lambda x: x.x, reverse=True)
-        if platoon_vehicles[l] != []:
-            platoon_vehicles[l][0].set_leader()
-            for v in platoon_vehicles[l][1:]: v.unset_leader()
+    platoon_vehicles = []
+    for v in vehicles_list:
+        platoon_vehicles.append(v)
+    platoon_vehicles.sort(key=lambda x: x.x, reverse=True)
+    if platoon_vehicles != []:
+        if platoon_vehicles[0].platoon_status["overtaking"] != platoon_vehicles[0]:
+            platoon_vehicles[0].set_leader()
+            for v in platoon_vehicles[1:]: v.unset_leader()
+        else:
+            platoon_vehicles[1].set_leader()
+            for i, v in enumerate(platoon_vehicles):
+                if i != 1:
+                    v.unset_leader()
 
     return platoon_vehicles
 
@@ -56,32 +59,33 @@ u_first_vehicle = np.sin(freq* times)
 if __name__ == '__main__':
     for t in range(N):
         platoon_vehicles = update_platoon_order(vehicles_list)
-        for l in platoon_vehicles.keys():
-            for i, v in enumerate(platoon_vehicles[l]):
 
-                if abs(platoon_vehicles[l][i-1].x - v.x) < conf.comm_range and i != 0:
-                    v.platoon_status[platoon_vehicles[l][i]] = v.status
-                    v.platoon_status.update(platoon_vehicles[l][i - 1].platoon_status)
+        for i, v in enumerate(platoon_vehicles):
+
+            if abs(platoon_vehicles[i-1].x - v.x) < conf.comm_range and i != 0:
+                v.platoon_status[platoon_vehicles[i]] = v.status
+                v.platoon_status.update(platoon_vehicles[i - 1].platoon_status)
+            else:
+                # If not in communication range, it knows only its status
+                v.platoon_status[platoon_vehicles[i]] = v.status
+
+            if v == platoon_vehicles[-1] and v.platoon_status["overtaking"] is None and t % k_optimize == 0:
+                # compute optimization
+                v.compute_truck_scheduling()
+                # Messaging
+                for j in reversed(range(len(platoon_vehicles))):
+                    if abs(platoon_vehicles[j-1].x - platoon_vehicles[j].x) < conf.comm_range:
+                        platoon_vehicles[j-1].set_schedule(platoon_vehicles[j].schedule)
+
+            if not v.leader:
+                if platoon_vehicles[i-1].lane == v.lane:
+                    to_follow = platoon_vehicles[i-1]
                 else:
-                    # If not in communication range, it knows only its status
-                    v.platoon_status[platoon_vehicles[l][i]] = v.status
-
-                if v == platoon_vehicles[l][-1] and t % k_optimize == 0:
-                    # compute optimization
-                    v.compute_truck_scheduling()
-                    # Messaging
-                    for j in reversed(range(len(platoon_vehicles[l]))):
-                        if abs(platoon_vehicles[l][j-1].x - platoon_vehicles[l][j].x) < conf.comm_range:
-                            platoon_vehicles[l][j-1].set_schedule(platoon_vehicles[l][j].schedule)
-
-                if i != 0:
-                    v.update(platoon_vehicles[l][i-1]) # follow vehicle in front
-                else:
-                    v.update()
-
-                
-                
-                
+                    to_follow = platoon_vehicles[i-2]
+                v.update(to_follow) # follow vehicle in front
+            else:
+                v.update()
+      
                 
                     
     legend = ["Vehicle {}".format(i) for i in range(n_vehicles)]

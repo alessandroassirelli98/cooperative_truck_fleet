@@ -36,6 +36,7 @@ class Vehicle:
         self.L = L # Wheelbase of vehicle
         self.tau = conf.tau # Time constant of the acceleration
         self.r = conf.r # parameters that indicates standstill spacing
+        self.h_spacing = conf.h
 
         self.v_max = conf.v_max
         self.a_max = conf.a_max
@@ -143,18 +144,18 @@ class Vehicle:
 
 
     def track_front_vehicle(self, front_vehicle, use_velocity_info = True):
-        self.e1 = front_vehicle.x - self.x - self.r - conf.h * self.v
-        self.e2 = front_vehicle.v - self.v - conf.h * self.a
-        self.e3 = front_vehicle.a - self.a - (1/conf.tau * (- self.a + self.u_fwd) * conf.h)
+        self.e1 = front_vehicle.x - self.x - self.r - self.h_spacing * self.v
+        self.e2 = front_vehicle.v - self.v - self.h_spacing * self.a
+        self.e3 = front_vehicle.a - self.a - (1/conf.tau * (- self.a + self.u_fwd) * self.h_spacing)
 
         if use_velocity_info:
-            self.u_fwd += 1/conf.h * ( - self.u_fwd + 
+            self.u_fwd += 1/self.h_spacing * ( - self.u_fwd + 
                                   conf.kp*self.e1 + 
                                   conf.kd*self.e2 + 
                                   conf.kdd*self.e3 + 
                                   front_vehicle.u_fwd) * self.dt
         else:
-            self.u_fwd += 1/conf.h * ( - self.u + conf.kp*self.e1 + conf.kd*self.e2 + conf.kdd*self.e3) * self.dt
+            self.u_fwd += 1/self.h_spacing * ( - self.u + conf.kp*self.e1 + conf.kd*self.e2 + conf.kdd*self.e3) * self.dt
         self.omega = 0  
 
 
@@ -167,7 +168,7 @@ class Vehicle:
             v_leader = leader.v
             x_leader = leader.x
 
-            if self.x < x_leader + 10:
+            if self.x < x_leader + leader.r + leader.h_spacing * leader.v:
                 self.lane = self.street.lanes[1]
                 x_target = self.x + self.street.lane_width
                 y_target = self.street.lane_width
@@ -186,7 +187,7 @@ class Vehicle:
                                   [x_target, y_target], 
                                   [self.lane.x_end, self.street.lane_width]]) # Change lane
 
-                self.v_des -= 10
+                self.v_des -= 10 
                 self.in_overtake = False
                 self.platoon_status["overtaking"] = None
 
@@ -197,10 +198,12 @@ class Vehicle:
         self.update_sensors(front_vehicle)
         try:
             if self.x - self.x_received_schedule > self.schedule[self][0] \
-                and self.platoon_status["overtaking"] is None and not self.leader: 
+                and self.platoon_status["overtaking"] is None: 
                 self.plan_overtake = True
                 del self.schedule[self]
             else:
+                if self.leader:
+                    del self.schedule[self]
                 self.plan_overtake = False
         except:
             self.plan_overtake = False
@@ -208,15 +211,14 @@ class Vehicle:
         if self.plan_overtake or self.in_overtake:
             self.overtake()
 
-        if not self.leader and not self.in_overtake:
+        if not self.leader and not self.in_overtake and front_vehicle is not None:
             self.track_front_vehicle(front_vehicle)
         else:
             self.u_fwd = self.pid_vel.compute(self.v_des - self.v, self.dt)
 
         xy_position = np.array([self.x, self.y])
         alpha_des = self.steer_control.ComputeSteeringAngle(self.path, xy_position, self.delta, self.L)
-        self.omega = self.pid_steer.compute(alpha_des - self.alpha, self.dt)  # Compute steering angle acceleration
-
+        self.omega = self.pid_steer.compute(alpha_des - self.alpha, self.dt)  # Compute steering angle velocity
         
 
         self.u = np.array([self.u_fwd, 0])
@@ -261,7 +263,8 @@ class Vehicle:
         alpha = self.S_sym[3]
         v1 = self.S_sym[4]
         a1 = self.S_sym[5]
-        if not self.leader:
+
+        if not self.leader and front_vehicle is not None:
             self.h = cas.vertcat(y, # Lane detection with cameras
                              delta, # Cameras
                              delta + self.street.angle, # Magnetometer
@@ -378,7 +381,6 @@ class Vehicle:
 
     def unset_leader(self):
         self.leader = False
-        self.platoon_status["leader"] = None
 
 
 def without_keys(d, keys):
