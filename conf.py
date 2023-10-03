@@ -23,6 +23,8 @@ r = 30
 v_max = 40
 a_max = 60
 
+comm_range = 100
+
 ### Measurement uncertainties
 sigma_y = 1e-1
 sigma_delta = 1e-1
