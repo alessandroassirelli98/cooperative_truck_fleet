@@ -24,7 +24,7 @@ class Estimator:
         self.Q = vehicle.Q
         self.R = vehicle.R
         
-        S0_hat = vehicle.S0 * 0
+        S0_hat = vehicle.S0
         self.S_hat = np.zeros((self.n, N))
         self.P = np.zeros((self.n, self.n, N))
 
@@ -40,7 +40,7 @@ class Estimator:
         self.h_fun = cas.Function('h_fun', [self.vehicle.S_sym], [self.vehicle.h])
 
     
-    def run_filter(self, u, i):
+    def run_filter(self, u, i, ):
         self.update_sensor_set()
         G = self.G_fun(self.S_hat[:,i], u).full()
         A = self.A_fun(self.S_hat[:,i], u).full()
@@ -53,13 +53,13 @@ class Estimator:
         H = self.H_fun(self.S_hat[:,i+1]).full()
         # z = np.array([self.vehicle.S[1],
         #             self.vehicle.S[2],
+        #             self.vehicle.S[2] + self.vehicle.street.angle,
         #             self.vehicle.S[3],
         #             self.vehicle.S[4],
         #             self.vehicle.S[5],
-        #             self.vehicle.S[2] + self.vehicle.street.angle,
         #             self.vehicle.S[0]*np.cos(self.vehicle.street.angle) - self.vehicle.S[1]*np.sin(self.vehicle.street.angle) ,
         #             self.vehicle.S[0]*np.sin(self.vehicle.street.angle) + self.vehicle.S[1]*np.cos(self.vehicle.street.angle)
-        #             ]) + self.eps[:,i] # Measurement Simulation
+        #             self.vehicle.S[0] - ]) + self.eps[:,i] # Measurement Simulation
         
         z = self.h_fun(self.vehicle.S).full().flatten() + self.vehicle.eps[:,i] # Measurement Simulation
 

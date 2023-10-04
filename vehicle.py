@@ -8,7 +8,7 @@ from estimator import Estimator
 import casadi as cas
 
 class Vehicle:
-    def __init__(self, street:Street, lane:Lane, s, v, dt, N, L=3):
+    def __init__(self, street:Street, lane:Lane, s, v, dt, N, L=3, starting_battery=100):
         self.pid_steer = PID(kp=conf.kp_pos, kd=conf.kd_pos, ki=conf.ki_pos, integral_sat=conf.v_max)
         self.pid_vel = PID(kp=conf.kp_vel, kd=conf.kd_vel, ki=conf.ki_vel, integral_sat=conf.v_max)
         
@@ -29,7 +29,6 @@ class Vehicle:
         self.u_fwd = 0
         self.u = np.array([self.u_fwd, self.omega])
         
-
         self.S0 = np.array([self.x, self.y, self.delta, self.alpha, v, self.a])
         self.S = self.S0
 
@@ -98,6 +97,7 @@ class Vehicle:
             conf.sigma_x_gps**2 + conf.sigma_y_gps**2,
             conf.sigma_radar**2
             ])
+        
         self.Q = conf.Q       
         self.nu = np.random.multivariate_normal([0, 0], self.Q, N).T
         self.eps = np.random.multivariate_normal(np.zeros(self.R.shape[0]), self.R, N).T
@@ -115,11 +115,12 @@ class Vehicle:
         # v = 10 km/h
         # t = 1h
         # Autonomy is given in liters of fuel
-        # C0 is the fuel consumption expressed in l per km
-        # C1 is the additional fuel consumption in l per km if the vehicle is the leader
-        self.autonomy = 100
-        self.c0 = 1 
-        self.c1 = 0.5
+        # C0 is the fuel consumption expressed in % of battery per meter
+        # C1 is the additional fuel consumption in % per meter if the vehicle is the leader
+        self.starting_battery = starting_battery
+        self.autonomy = self.starting_battery
+        self.c0 = 10/100 / 1000  
+        self.c1 = 10/100 / 1000  
         self.status = [self.autonomy, self.c0, self.c1, self.x]
         self.platoon_status = OrderedDict()
         self.platoon_status["leader"] = None
@@ -143,22 +144,33 @@ class Vehicle:
         self.log_xydelta_world = []
 
 
-    def track_front_vehicle(self, front_vehicle, use_velocity_info = True):
-        self.e1 = front_vehicle.x - self.x - self.r - self.h_spacing * self.v
-        self.e2 = front_vehicle.v - self.v - self.h_spacing * self.a
-        self.e3 = front_vehicle.a - self.a - (1/conf.tau * (- self.a + self.u_fwd) * self.h_spacing)
+    def track_front_vehicle(self, front_vehicle, can_talk = False):
 
-        if use_velocity_info:
+        # If they can talk use the informations from the front vehicle
+        if can_talk:
+            self.e1 = front_vehicle.x - self.x - self.r - self.h_spacing * self.v
+            self.e2 = front_vehicle.v - self.v - self.h_spacing * self.a
+            self.e3 = front_vehicle.a - self.a - (1/conf.tau * (- self.a + self.u_fwd) * self.h_spacing)
+
             self.u_fwd += 1/self.h_spacing * ( - self.u_fwd + 
                                   conf.kp*self.e1 + 
                                   conf.kd*self.e2 + 
                                   conf.kdd*self.e3 + 
                                   front_vehicle.u_fwd) * self.dt
-        else:
-            self.u_fwd += 1/self.h_spacing * ( - self.u + conf.kp*self.e1 + conf.kd*self.e2 + conf.kdd*self.e3) * self.dt
-        self.omega = 0  
+            
+        # If they cannot communicate, and the radar sees the front vehicle
+        # the follower vehicle takes a measurement
+        elif abs(front_vehicle.S[0] - self.S[0]) < conf.radar_range:
+            eps_radar = self.eps[8, self.cnt]
+            eps_radardot = np.random.normal(0, 2 * conf.sigma_radar / self.dt)
+            self.e1 = front_vehicle.S[0] - self.S[0] + eps_radar - self.r - self.h_spacing * self.v
+            self.e2 = front_vehicle.S[4] - self.S[4] + eps_radardot - self.h_spacing * self.a
+            self.u_fwd += 1/self.h_spacing * ( - self.u_fwd + conf.kp*self.e1 + conf.kd*self.e2) * self.dt
 
-
+        # If they cannot communicate, and the radar does not see the front vehicle
+        # Go with the actual speed
+        else: 
+            self.v_des = self.v
 
     def set_desired_velocities(self, v_des):
         self.u_fwd = self.pid_vel.compute(v_des - self.v, self.dt)
@@ -172,7 +184,7 @@ class Vehicle:
                 self.lane = self.street.lanes[1]
                 x_target = self.x + self.street.lane_width
                 y_target = self.street.lane_width
-                self.v_des = v_leader + 10
+                self.v_des = self.v_max
                 self.path = np.array([[self.x, self.y], 
                                   [x_target, y_target], 
                                   [self.lane.x_end, self.street.lane_width]]) # Change lane
@@ -185,36 +197,38 @@ class Vehicle:
                 y_target = 0
                 self.path = np.array([[self.x, self.y], 
                                   [x_target, y_target], 
-                                  [self.lane.x_end, self.street.lane_width]]) # Change lane
+                                  [self.lane.x_end, 0]]) # Change lane
 
-                self.v_des -= 10 
+                self.v_des = 15 
                 self.in_overtake = False
                 self.platoon_status["overtaking"] = None
-
-            self.plan_overtake = False
+                self.set_leader()
 
                 
-    def update(self, front_vehicle = None):
-        self.update_sensors(front_vehicle)
-        try:
-            if self.x - self.x_received_schedule > self.schedule[self][0] \
-                and self.platoon_status["overtaking"] is None: 
-                self.plan_overtake = True
-                del self.schedule[self]
-            else:
-                if self.leader:
-                    del self.schedule[self]
-                self.plan_overtake = False
-        except:
-            self.plan_overtake = False
-        
-        if self.plan_overtake or self.in_overtake:
-            self.overtake()
+    def update(self, front_vehicle = None, can_talk = False):
+        self.update_sensors(front_vehicle, can_talk)
 
-        if not self.leader and not self.in_overtake and front_vehicle is not None:
-            self.track_front_vehicle(front_vehicle)
-        else:
+        if len(self.schedule) != 0 and self in self.schedule:
+            if self.schedule[self][0] is not None and \
+                (self.platoon_status["overtaking"] is None or self.platoon_status["overtaking"] == self):
+                if self.x - self.x_received_schedule >= self.schedule[self][0] - 1e-5: 
+                    self.in_overtake = True
+                    del self.schedule[self]
+                else:
+                    if self.leader:
+                        del self.schedule[self]
+        
+        
+        if not self.leader and not self.in_overtake:
+            self.track_front_vehicle(front_vehicle, can_talk)   
+
+        elif self.leader:    
             self.u_fwd = self.pid_vel.compute(self.v_des - self.v, self.dt)
+
+        elif self.in_overtake:
+            self.overtake()
+            self.u_fwd = self.pid_vel.compute(self.v_des - self.v, self.dt)
+        
 
         xy_position = np.array([self.x, self.y])
         alpha_des = self.steer_control.ComputeSteeringAngle(self.path, xy_position, self.delta, self.L)
@@ -256,7 +270,7 @@ class Vehicle:
         self.cnt += 1
 
 
-    def update_sensors(self, front_vehicle):
+    def update_sensors(self, front_vehicle, can_talk = False):
         x = self.S_sym[0]
         y = self.S_sym[1]
         delta = self.S_sym[2]
@@ -264,28 +278,39 @@ class Vehicle:
         v1 = self.S_sym[4]
         a1 = self.S_sym[5]
 
-        if not self.leader and front_vehicle is not None:
+        p_radar = np.random.rand()
+        p_gps = np.random.rand()
+        use_radar = 0
+        use_gps = 0
+
+        if not self.leader and can_talk:
+            if (p_radar <= conf.P_radar):
+                use_radar = 1
+
             self.h = cas.vertcat(y, # Lane detection with cameras
-                             delta, # Cameras
-                             delta + self.street.angle, # Magnetometer
-                             alpha, # Encoder on steering wheel
-                             v1, # Encoder on motor shaft
-                             a1, # Accelerometer
-                             0*(x * cas.cos(self.street.angle) - y * cas.sin(self.street.angle)), # GPS
-                             0*(x * cas.sin(self.street.angle) + y * cas.cos(self.street.angle)), # GPS
-                             x # Radar
+                            delta, # Cameras
+                            delta + self.street.angle, # Magnetometer
+                            alpha, # Encoder on steering wheel
+                            v1, # Encoder on motor shaft
+                            a1, # Accelerometer
+                            0*(x * cas.cos(self.street.angle) - y * cas.sin(self.street.angle)), # GPS
+                            0*(x * cas.sin(self.street.angle) + y * cas.cos(self.street.angle)), # GPS
+                            use_radar*(front_vehicle.S[0] - x - front_vehicle.x) # Radar
                             )
             self.R[-1,-1] = conf.sigma_radar**2 + front_vehicle.estimator.P[0, 0, self.cnt]
 
         else:
+            if (p_gps <= conf.P_gps):
+                use_gps = 1
+
             self.h = cas.vertcat(y, # Lane detection with cameras
                              delta, # Cameras
                              delta + self.street.angle, # Magnetometer
                              alpha, # Encoder on steering wheel
                              v1, # Encoder on motor shaft
                              a1, # Accelerometer
-                             (x * cas.cos(self.street.angle) - y * cas.sin(self.street.angle)), # GPS
-                             (x * cas.sin(self.street.angle) + y * cas.cos(self.street.angle)), # GPS
+                             use_gps * (x * cas.cos(self.street.angle) - y * cas.sin(self.street.angle)), # GPS
+                             use_gps * (x * cas.sin(self.street.angle) + y * cas.cos(self.street.angle)), # GPS
                              0*x # Radar
                             )
     
@@ -296,84 +321,110 @@ class Vehicle:
         c1s = [s[2] for s in vehicles_info.values()]
         ls = [s[0] for s in vehicles_info.values()]
         S = self.street.length - self.x
-        n = len(vehicles_info.keys())
+        if S > 0 and self.platoon_status["leader"] is not None:
+            n = len(vehicles_info.keys())
 
-        C = np.zeros((2*n, 2*n))
+            C = np.zeros((2*n, 2*n))
 
-        for j in range(2*n):
-            C[0, j] = 1 if (j % 2 == 0  and j + 2 != 2*n) else 0
-            C[0, -1] = -1
+            for j in range(2*n):
+                C[0, j] = 1 if (j % 2 == 0  and j + 2 != 2*n) else 0
+                C[0, -1] = -1
 
-        for i in range(n - 1):
-            for j in range(2 * n):
-                if j == 2*i + 1:
-                    C[i + 1,j] = -1
-                elif j % 2 == 0 and j != 2*i:
-                    C[i + 1,j] = 1
+            for i in range(n - 1):
+                for j in range(2 * n):
+                    if j == 2*i + 1:
+                        C[i + 1,j] = -1
+                    elif j % 2 == 0 and j != 2*i:
+                        C[i + 1,j] = 1
 
-        for i in range(0, n):
-            for j in range(2*i, 2*n):
-                C[n + i, j : j + 2] = np.array([1,1])
-                break
+            for i in range(0, n):
+                for j in range(2*i, 2*n):
+                    C[n + i, j : j + 2] = np.array([1,1])
+                    break
 
-        B = np.zeros((n, 2* n))
-        for i in range(0, n):
-            for j in range(2*i, 2*n):
-                B[i, j : j + 2] = np.array([c0s[i] + c1s[i], c0s[i]])
-                break
+            B = np.zeros((n, 2* n))
+            for i in range(0, n):
+                for j in range(2*i, 2*n):
+                    B[i, j : j + 2] = np.array([c0s[i] + c1s[i], c0s[i]])
+                    break
 
-        b = np.zeros((2*n))
-        b[n:] = np.ones(n) * S
+            b = np.zeros((2*n))
+            b[n:] = np.ones(n) * S
 
-        opti = cas.Opti()
-        U = opti.variable(n*2)
+            opti = cas.Opti()
+            U = opti.variable(n*2)
 
-        life = ls - B @ U
+            life = ls - B @ U
 
-        opti.subject_to( C @ U - b == 0)
-        opti.subject_to( U >= np.zeros((n*2,1)))
+            opti.subject_to( C @ U - b == 0)
+            opti.subject_to( U >= np.zeros((n*2,1)))
 
-        # opti.minimize(cas.sumsqr(cas.diff(life) ) )
-        opti.minimize(cas.sumsqr(B @ U)) 
+            opti.minimize( cas.sumsqr( cas.diff(life)) )
+            # opti.minimize(cas.sumsqr(B @ U)) 
 
-        p_opts = {"expand":True}
-        s_opts = {"max_iter": 10000}
-        opti.solver('ipopt', p_opts, s_opts)
+            p_opts = {"expand":True}
+            s_opts = {"max_iter": 10000}
+            opti.solver('ipopt', p_opts, s_opts)
 
-        sol = opti.solve() 
+            sol = opti.solve() 
 
-        # Obtain a sequence
-        # [S_head, S_in_queue] for each vehicle
-        u = np.array(np.split(np.round(sol.value(U),0),n))
-        decreasing_order = u[:, 1].argsort()
-               
-        # Store the scheduling for each vehicle
-        # Starting from the actual leading vehicle to the last one
-        # The schedule must be shifted in order to consider the actual leading vehicle
-        # As the first vehicle executing the leader role of the platoon
+            # Obtain a sequence
+            # [S_head, S_in_queue] for each vehicle
+            u = np.array(np.split(np.round(sol.value(U),0),n))
+            decreasing_order = u[:, 1].argsort()
+            not_optimal_u = np.array([S,0])
+            not_optimal_u = np.concatenate([np.array([0, S] * (n-1)), not_optimal_u])
+            np.savetxt('not_optimal_life.out', ls - B @ not_optimal_u, delimiter=',')
+            np.savetxt('optimal_life.out', sol.value(life), delimiter=',')
 
-        # {v0: [0, S_head, S_in_queue], v1: [S_overtaking, S_head, S_in_queue], ...}
-        # For the actual leader there is no need to overtake
-        # The others must do it at the right moment
-        shift = np.where(decreasing_order == n-1)[0][0]
-        order = np.roll(decreasing_order, -shift)
-        u = u[order]
+                
+            # Store the scheduling for each vehicle
+            # Starting from the actual leading vehicle to the last one
+            # The schedule must be shifted in order to consider the actual leading vehicle
+            # As the first vehicle executing the leader role of the platoon
 
-        vehicles = np.array([v for v in vehicles_info])
-        vehicles = vehicles[order]
-        schedule = {}
+            # {v0: [None, S_head, S_in_queue], v1: [S_overtaking, S_head, S_in_queue], ...}
+            # For the actual leader there is no need to overtake
+            # The others must do it at the right moment
+            for i, ve in enumerate(vehicles_info):
+                if ve == self.platoon_status["leader"]:
+                    target = i
+            shift = np.where(decreasing_order == target)[0][0]
+            order = np.roll(decreasing_order, -shift)
+            u = u[order]
 
-        s = 0
-        for i,v in enumerate(vehicles):
-            schedule[v] = [s, u[i]]
-            s += u[i][0]
+            vehicles = np.array([v for v in vehicles_info])
+            vehicles = vehicles[order]
+            schedule = {}
 
-        self.schedule = schedule
+            s = 0
+            for i,v in enumerate(vehicles):
+                if i == 0:
+                    schedule[v] = [None, u[i]]
+                else:
+                    schedule[v] = [s, u[i]]
+                s += u[i][0]
+
+            self.set_schedule(schedule)
+            
+        else:
+            if S <= 0:
+                print("No scheduling needed, the road is finished")
+            else:
+                print("Cannot compute scheduling, no leader")   
+            self.schedule = {}
+
 
     
     def set_schedule(self, schedule):
         self.schedule = schedule
-        self.x_received_schedule = self.x
+        self.x_received_schedule = self.x 
+
+        for v in schedule:
+            if schedule[v][0] is not None:
+                if schedule[v][0] > -1e-5 and schedule[v][0] < 1e-5:
+                    self.platoon_status["overtaking"] = v
+                    break
 
     def set_leader(self):
         self.leader = True

@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from street import Street, Lane
@@ -7,17 +8,16 @@ import conf
 plt.style.use('seaborn')
 
 
-street = Street(0, 0, 100, 100)
+street = Street(0, 0, 1000, 0)
 lanes = street.lanes
 n_vehicles = 5
 
-dt = 0.05
-T = 150
+dt = 0.1
+T = 250
 N = int(T/dt)
 
-vehicles_list = [Vehicle(street, lanes[0], 20, 20, dt, N+1, L=3)]
-vehicles_list[0].status = [100, 2, 1, 20]
-[vehicles_list.append(Vehicle(street, lanes[0], vehicles_list[i].x - conf.r/2, 20, dt, N+1, L=3)) for i in range(n_vehicles-1)]
+vehicles_list = [Vehicle(street, lanes[0], 20, 10, dt, N+1, L=3, starting_battery=100)]
+[vehicles_list.append(Vehicle(street, lanes[0], vehicles_list[i].x - 50, 20, dt, N+1, L=3)) for i in range(n_vehicles-1)]
 
 
 def update_platoon_order(vehicles_list):
@@ -53,7 +53,7 @@ def update_animation(frame):
 
 times = np.linspace(0, T, N)
 freq = 0.36
-k_optimize = 10000
+k_optimize = 20000000
 u_first_vehicle = np.sin(freq* times)
 
 if __name__ == '__main__':
@@ -62,6 +62,8 @@ if __name__ == '__main__':
 
         for i, v in enumerate(platoon_vehicles):
 
+            # Flow of status information from leading vehicle to the last one
+            # These informations are needed to compute the optimal schedule
             if abs(platoon_vehicles[i-1].x - v.x) < conf.comm_range and i != 0:
                 v.platoon_status[platoon_vehicles[i]] = v.status
                 v.platoon_status.update(platoon_vehicles[i - 1].platoon_status)
@@ -69,10 +71,13 @@ if __name__ == '__main__':
                 # If not in communication range, it knows only its status
                 v.platoon_status[platoon_vehicles[i]] = v.status
 
+            # The last vehicle compute the optimal schedule
+            # It does so only if there is no vehicle executing an overtaking maneuver
+
             if v == platoon_vehicles[-1] and v.platoon_status["overtaking"] is None and t % k_optimize == 0:
-                # compute optimization
-                v.compute_truck_scheduling()
-                # Messaging
+                
+                v.compute_truck_scheduling() # Compute optimization
+                
                 for j in reversed(range(len(platoon_vehicles))):
                     if abs(platoon_vehicles[j-1].x - platoon_vehicles[j].x) < conf.comm_range:
                         platoon_vehicles[j-1].set_schedule(platoon_vehicles[j].schedule)
@@ -82,7 +87,10 @@ if __name__ == '__main__':
                     to_follow = platoon_vehicles[i-1]
                 else:
                     to_follow = platoon_vehicles[i-2]
-                v.update(to_follow) # follow vehicle in front
+
+                talk = True if abs(to_follow.x - v.x) < conf.comm_range else False
+                v.update(to_follow, talk) 
+
             else:
                 v.update()
       
@@ -154,6 +162,33 @@ if __name__ == '__main__':
         plt.plot(log_xydelta[i, :, 0], log_xydelta[i, :, 1])
         plt.plot(log_xy_hat[i][0, :], log_xy_hat[i][1, :])
     plt.legend(legend)
+
+    battery_levels = {"optimized":[], "standard":[]}
+    not_optimal = pd.read_csv("not_optimal_life.out", delimiter=',', header=None).values.flatten()
+    optimal = pd.read_csv("optimal_life.out", delimiter=',', header=None).values.flatten()
+    
+
+    for i, v in enumerate(vehicles_list):
+        battery_levels["optimized"].append(optimal[i])
+        battery_levels["standard"].append(not_optimal[i])
+
+    x = np.arange(len(vehicles_list))  # the label locations
+    width = 0.25  # the width of the bars
+    multiplier = 0
+
+    fig, ax = plt.subplots(layout='constrained')
+
+    for attribute, measurement in battery_levels.items():
+        offset = width * multiplier
+        rects = ax.bar(x + offset, measurement, width, label=attribute)
+        ax.bar_label(rects, padding=3)
+        multiplier += 1
+
+    # Add some text for labels, title and custom x-axis tick labels, etc.
+    ax.set_ylabel('Length (mm)')
+    ax.set_title('Battery usage comparison')
+    ax.set_xticks(x + width, vehicles_list)
+    ax.legend(loc='upper left', ncols=3)
 
 
     ### Show the simulation

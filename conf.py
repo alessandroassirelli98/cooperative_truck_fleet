@@ -1,12 +1,12 @@
 import numpy as np
 
-animate = True
+animate = False
 
 kp_pos = 5
 kd_pos = 0.5
 ki_pos = 0
 
-kp_vel = 5
+kp_vel = 1
 kd_vel = 0.2
 ki_vel = 0
 
@@ -24,6 +24,10 @@ v_max = 40
 a_max = 60
 
 comm_range = 100
+radar_range = 50
+
+P_gps = 0.1
+P_radar = 0.1
 
 ### Measurement uncertainties
 sigma_y = 1e-2
