@@ -23,8 +23,8 @@ r = 30
 v_max = 40
 a_max = 60
 
-comm_range = 1000
-radar_range = 50
+comm_range = 100
+radar_range = 100
 
 P_gps = 0.1
 P_radar = 0.1

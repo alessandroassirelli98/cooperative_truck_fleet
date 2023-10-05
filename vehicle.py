@@ -186,7 +186,7 @@ class Vehicle:
                 v_leader = last_leader.v
                 x_leader = last_leader.x
 
-                if self.x < x_leader + last_leader.r + last_leader.h_spacing * last_leader.v:
+                if self.x < x_leader + last_leader.r + last_leader.h_spacing * v_leader:
                     self.lane = self.street.lanes[1]
                     x_target = self.x + self.street.lane_width
                     y_target = self.street.lane_width
@@ -216,14 +216,14 @@ class Vehicle:
         if self.schedule["overtaking"] == self:
             self.in_overtake = True        
         
-        if not self.leader and not self.in_overtake:
+        if not self.leader and not self.in_overtake and front_vehicle:
             self.track_front_vehicle(front_vehicle, can_talk)   
 
         elif self.in_overtake:
             self.overtake()
             self.u_fwd = self.pid_vel.compute(self.v_des - self.v, self.dt)
 
-        elif self.leader:    
+        else:    
             self.u_fwd = self.pid_vel.compute(self.v_des - self.v, self.dt)
         
 

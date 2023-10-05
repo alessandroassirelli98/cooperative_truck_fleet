@@ -8,7 +8,7 @@ import conf
 plt.style.use('seaborn')
 
 
-street = Street(0, 0, 1000, 0)
+street = Street(0, 0, 5000, 0)
 lanes = street.lanes
 n_vehicles = 5
 
@@ -76,12 +76,10 @@ if __name__ == '__main__':
                 platoon_vehicles[i+1].schedule["leader"] = platoon_vehicles[i].schedule["leader"]
                 platoon_vehicles[i+1].schedule["last_leader"] = platoon_vehicles[i].schedule["last_leader"]
                 
-
         # Messaging cycle from last vehicle to leader
         for i, v in reversed(list(enumerate(platoon_vehicles))):
             if i != 0:
                 platoon_vehicles[i-1].platoon_status.update(platoon_vehicles[i].platoon_status)
-
 
         # Update the vehicles actions
         for i, v in enumerate(platoon_vehicles):
@@ -92,14 +90,14 @@ if __name__ == '__main__':
                 schedule_available = True
 
             if not v.leader:
-                # if platoon_vehicles[i-1].lane == v.lane:
-                #     to_follow = platoon_vehicles[i-1]
-                # else:
-                to_follow = platoon_vehicles[i-1]
-
-                talk = True if abs(to_follow.x - v.x) < conf.comm_range else False
-                v.update(to_follow, talk) 
-
+                if v.lane == platoon_vehicles[i-1].lane:
+                    to_follow = platoon_vehicles[i-1]
+                    talk = True if abs(to_follow.x - v.x) < conf.comm_range else False
+                    v.update(to_follow, talk) 
+                
+                else:
+                    v.update() 
+                    
             else:
                 v.update()
       
