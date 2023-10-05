@@ -123,9 +123,13 @@ class Vehicle:
         self.c1 = 10/100 / 1000  
         self.status = [self.autonomy, self.c0, self.c1, self.x]
         self.platoon_status = OrderedDict()
-        self.platoon_status["leader"] = None
-        self.platoon_status["overtaking"] = None
+        self.platoon_status[self] = self.status
+        self.xs_schedule = {}
+
         self.schedule = OrderedDict()
+        self.schedule["leader"] = self
+        self.schedule["last_leader"] = self
+        self.schedule["overtaking"] = None
 
         self.in_overtake = False
         self.plan_overtake = False
@@ -176,57 +180,50 @@ class Vehicle:
         self.u_fwd = self.pid_vel.compute(v_des - self.v, self.dt)
 
     def overtake(self):
-            leader = self.platoon_status["leader"]
-            v_leader = leader.v
-            x_leader = leader.x
+            
+            last_leader = self.schedule["last_leader"]
+            if last_leader is not None:
+                v_leader = last_leader.v
+                x_leader = last_leader.x
 
-            if self.x < x_leader + leader.r + leader.h_spacing * leader.v:
-                self.lane = self.street.lanes[1]
-                x_target = self.x + self.street.lane_width
-                y_target = self.street.lane_width
-                self.v_des = self.v_max
-                self.path = np.array([[self.x, self.y], 
-                                  [x_target, y_target], 
-                                  [self.lane.x_end, self.street.lane_width]]) # Change lane
-                self.in_overtake = True
-                self.platoon_status["overtaking"] = self
+                if self.x < x_leader + last_leader.r + last_leader.h_spacing * last_leader.v:
+                    self.lane = self.street.lanes[1]
+                    x_target = self.x + self.street.lane_width
+                    y_target = self.street.lane_width
+                    self.v_des = self.v_max
+                    self.path = np.array([[self.x, self.y], 
+                                    [x_target, y_target], 
+                                    [self.lane.x_end, self.street.lane_width]]) # Change lane
+                    self.in_overtake = True
+                    self.schedule["overtaking"] = self
 
-            else: # When the vehicle is in front of the leader go back to lane 0
-                self.lane = self.street.lanes[0]
-                x_target = self.x + self.street.lane_width
-                y_target = 0
-                self.path = np.array([[self.x, self.y], 
-                                  [x_target, y_target], 
-                                  [self.lane.x_end, 0]]) # Change lane
+                else: # When the vehicle is in front of the leader go back to lane 0
+                    self.lane = self.street.lanes[0]
+                    x_target = self.x + self.street.lane_width
+                    y_target = 0
+                    self.path = np.array([[self.x, self.y], 
+                                    [x_target, y_target], 
+                                    [self.lane.x_end, 0]]) # Change lane
 
-                self.v_des = 15 
-                self.in_overtake = False
-                self.platoon_status["overtaking"] = None
-                self.set_leader()
+                    self.v_des = 15 
+                    self.in_overtake = False
+                    self.schedule["overtaking"] = None
 
                 
     def update(self, front_vehicle = None, can_talk = False):
         self.update_sensors(front_vehicle, can_talk)
 
-        if len(self.schedule) != 0 and self in self.schedule:
-            if self.schedule[self][0] is not None and \
-                (self.platoon_status["overtaking"] is None or self.platoon_status["overtaking"] == self):
-                if self.x - self.x_received_schedule >= self.schedule[self][0] - 1e-5: 
-                    self.in_overtake = True
-                    del self.schedule[self]
-                else:
-                    if self.leader:
-                        del self.schedule[self]
-        
+        if self.schedule["overtaking"] == self:
+            self.in_overtake = True        
         
         if not self.leader and not self.in_overtake:
             self.track_front_vehicle(front_vehicle, can_talk)   
 
-        elif self.leader:    
-            self.u_fwd = self.pid_vel.compute(self.v_des - self.v, self.dt)
-
         elif self.in_overtake:
             self.overtake()
+            self.u_fwd = self.pid_vel.compute(self.v_des - self.v, self.dt)
+
+        elif self.leader:    
             self.u_fwd = self.pid_vel.compute(self.v_des - self.v, self.dt)
         
 
@@ -255,6 +252,7 @@ class Vehicle:
         consumption = self.c0 + self.c1 if self.leader else self.c0
         self.autonomy -= consumption * self.v * self.dt
         self.status = [self.autonomy , self.c0, self.c1, self.x]
+        self.platoon_status[self] = self.status
         
         self.log_u.append(self.u)
         self.log_u_unc.append(self.u_unc)
@@ -316,12 +314,13 @@ class Vehicle:
     
     def compute_truck_scheduling(self):
         # The scheduling is computed in the street reference frame
-        vehicles_info = without_keys(self.platoon_status, ["leader", "overtaking"])
+        vehicles_info = without_keys(self.platoon_status, ["last_leader", "leader", "overtaking"])
+        self.xs_schedule = {s:s.status[3] for s in vehicles_info}
         c0s = [s[1] for s in vehicles_info.values()]
         c1s = [s[2] for s in vehicles_info.values()]
         ls = [s[0] for s in vehicles_info.values()]
         S = self.street.length - self.x
-        if S > 0 and self.platoon_status["leader"] is not None:
+        if S > 0 and self.schedule["leader"] is not None:
             n = len(vehicles_info.keys())
 
             C = np.zeros((2*n, 2*n))
@@ -359,8 +358,8 @@ class Vehicle:
             opti.subject_to( C @ U - b == 0)
             opti.subject_to( U >= np.zeros((n*2,1)))
 
-            opti.minimize( cas.sumsqr( cas.diff(life)) )
-            # opti.minimize(cas.sumsqr(B @ U)) 
+            # opti.minimize( cas.sumsqr( cas.diff(life)) )
+            opti.minimize(cas.sumsqr(B @ U)) 
 
             p_opts = {"expand":True}
             s_opts = {"max_iter": 10000}
@@ -373,7 +372,7 @@ class Vehicle:
             u = np.array(np.split(np.round(sol.value(U),0),n))
             decreasing_order = u[:, 1].argsort()
             not_optimal_u = np.array([S,0])
-            not_optimal_u = np.concatenate([np.array([0, S] * (n-1)), not_optimal_u])
+            not_optimal_u = np.concatenate([not_optimal_u, np.array([0, S] * (n-1))])
             np.savetxt('not_optimal_life.out', ls - B @ not_optimal_u, delimiter=',')
             np.savetxt('optimal_life.out', sol.value(life), delimiter=',')
 
@@ -387,7 +386,7 @@ class Vehicle:
             # For the actual leader there is no need to overtake
             # The others must do it at the right moment
             for i, ve in enumerate(vehicles_info):
-                if ve == self.platoon_status["leader"]:
+                if ve == self.schedule["leader"]:
                     target = i
             shift = np.where(decreasing_order == target)[0][0]
             order = np.roll(decreasing_order, -shift)
@@ -412,26 +411,34 @@ class Vehicle:
                 print("No scheduling needed, the road is finished")
             else:
                 print("Cannot compute scheduling, no leader")   
-            self.schedule = {}
+            schedule = {"overtaking": None}
+            self.set_schedule(schedule)
+
+    def update_overtaking(self):
+
+        for v in without_keys(self.schedule, ["last_leader", "leader", "overtaking"]):
+            if self.schedule[v][0] is not None:
+                if  (self.platoon_status[v][3] - self.xs_schedule[v]) > self.schedule[v][0] - 1e-3: 
+                    self.schedule["overtaking"] = v
+                    del self.schedule[v]
+                    
 
 
     
     def set_schedule(self, schedule):
-        self.schedule = schedule
-        self.x_received_schedule = self.x 
+        self.schedule.update(schedule)
 
-        for v in schedule:
-            if schedule[v][0] is not None:
-                if schedule[v][0] > -1e-5 and schedule[v][0] < 1e-5:
-                    self.platoon_status["overtaking"] = v
-                    break
-
-    def set_leader(self):
+    def set_leader(self, last_leader = None):
         self.leader = True
-        self.platoon_status["leader"] = self
+        self.schedule["leader"] = self
+        if last_leader is not None:
+            self.schedule["last_leader"] = last_leader
 
     def unset_leader(self):
         self.leader = False
+        self.schedule = OrderedDict()
+        self.schedule["leader"] = None
+        self.schedule["overtaking"] = None
 
 
 def without_keys(d, keys):

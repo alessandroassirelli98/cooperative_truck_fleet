@@ -16,24 +16,28 @@ dt = 0.1
 T = 250
 N = int(T/dt)
 
-vehicles_list = [Vehicle(street, lanes[0], 20, 10, dt, N+1, L=3, starting_battery=100)]
+vehicles_list = [Vehicle(street, lanes[0], 20, 10, dt, N+1, L=3, starting_battery=20)]
+vehicles_list[0].c0 = 3
+vehicles_list[0].status = [vehicles_list[0].autonomy , vehicles_list[0].c0, vehicles_list[0].c1, vehicles_list[0].x]
 [vehicles_list.append(Vehicle(street, lanes[0], vehicles_list[i].x - 50, 20, dt, N+1, L=3)) for i in range(n_vehicles-1)]
 
 
-def update_platoon_order(vehicles_list):
+def update_platoon_order(vehicles_list, prev_leader=None):
     platoon_vehicles = []
     for v in vehicles_list:
         platoon_vehicles.append(v)
     platoon_vehicles.sort(key=lambda x: x.x, reverse=True)
-    if platoon_vehicles != []:
-        if platoon_vehicles[0].platoon_status["overtaking"] != platoon_vehicles[0]:
-            platoon_vehicles[0].set_leader()
-            for v in platoon_vehicles[1:]: v.unset_leader()
-        else:
-            platoon_vehicles[1].set_leader()
-            for i, v in enumerate(platoon_vehicles):
-                if i != 1:
-                    v.unset_leader()
+    
+    if platoon_vehicles[0] != prev_leader:
+        platoon_vehicles[0].schedule = platoon_vehicles[1].schedule
+        platoon_vehicles[0].xs_schedule = platoon_vehicles[1].xs_schedule
+        platoon_vehicles[0].set_leader(last_leader=prev_leader)
+        prev_leader = platoon_vehicles[0]
+    else:
+        platoon_vehicles[0].set_leader()
+
+    for i in range(1, len(platoon_vehicles)):
+        platoon_vehicles[i].unset_leader()
 
     return platoon_vehicles
 
@@ -53,40 +57,45 @@ def update_animation(frame):
 
 times = np.linspace(0, T, N)
 freq = 0.36
-k_optimize = 20000000
+k_optimize = 100
 u_first_vehicle = np.sin(freq* times)
-
+schedule_available = False
 if __name__ == '__main__':
+    platoon_vehicles = [vehicles_list[0]]
     for t in range(N):
-        platoon_vehicles = update_platoon_order(vehicles_list)
+        platoon_vehicles = update_platoon_order(vehicles_list, platoon_vehicles[0])
 
+        # Messaging cycle from leader to last vehicle
+        for i, v in enumerate(platoon_vehicles):
+            if i != len(platoon_vehicles)-1:
+                if i == 0:
+                    platoon_vehicles[0].update_overtaking()
+                    schedule_available = False
+
+                platoon_vehicles[i+1].schedule["overtaking"] = platoon_vehicles[i].schedule["overtaking"]
+                platoon_vehicles[i+1].schedule["leader"] = platoon_vehicles[i].schedule["leader"]
+                platoon_vehicles[i+1].schedule["last_leader"] = platoon_vehicles[i].schedule["last_leader"]
+                
+
+        # Messaging cycle from last vehicle to leader
+        for i, v in reversed(list(enumerate(platoon_vehicles))):
+            if i != 0:
+                platoon_vehicles[i-1].platoon_status.update(platoon_vehicles[i].platoon_status)
+
+
+        # Update the vehicles actions
         for i, v in enumerate(platoon_vehicles):
 
-            # Flow of status information from leading vehicle to the last one
-            # These informations are needed to compute the optimal schedule
-            if abs(platoon_vehicles[i-1].x - v.x) < conf.comm_range and i != 0:
-                v.platoon_status[platoon_vehicles[i]] = v.status
-                v.platoon_status.update(platoon_vehicles[i - 1].platoon_status)
-            else:
-                # If not in communication range, it knows only its status
-                v.platoon_status[platoon_vehicles[i]] = v.status
-
-            # The last vehicle compute the optimal schedule
-            # It does so only if there is no vehicle executing an overtaking maneuver
-
-            if v == platoon_vehicles[-1] and v.platoon_status["overtaking"] is None and t % k_optimize == 0:
-                
+            # Then compute the optimization and share back the message            
+            if v.leader and v.schedule["overtaking"] is None and t==1:#t!=0 and t%k_optimize == 0:
                 v.compute_truck_scheduling() # Compute optimization
-                
-                for j in reversed(range(len(platoon_vehicles))):
-                    if abs(platoon_vehicles[j-1].x - platoon_vehicles[j].x) < conf.comm_range:
-                        platoon_vehicles[j-1].set_schedule(platoon_vehicles[j].schedule)
+                schedule_available = True
 
             if not v.leader:
-                if platoon_vehicles[i-1].lane == v.lane:
-                    to_follow = platoon_vehicles[i-1]
-                else:
-                    to_follow = platoon_vehicles[i-2]
+                # if platoon_vehicles[i-1].lane == v.lane:
+                #     to_follow = platoon_vehicles[i-1]
+                # else:
+                to_follow = platoon_vehicles[i-1]
 
                 talk = True if abs(to_follow.x - v.x) < conf.comm_range else False
                 v.update(to_follow, talk) 
