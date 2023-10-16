@@ -15,7 +15,7 @@ class PPC :
 
     def __init__(self):
         self.lastFoundIndex = 0 # Stores the index of the last segment the intersection has been found on
-        self.lookAheadDistance = 10; # Distance to look ahead for path intersection
+        self.lookAheadDistance = 20; # Distance to look ahead for path intersection
 
     # Compute the steering angle for path following
     def ComputeSteeringAngle(self, path, currentPosition, currentHeading, L):

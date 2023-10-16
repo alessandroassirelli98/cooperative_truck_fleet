@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib.pyplot as plt
 
 class Street:
     def __init__(self, x_start, y_start, x_end, y_end, n_lanes=2, lane_width=5):
@@ -25,6 +26,11 @@ class Street:
     def xy_to_s(self, x, y):
         return (x - self.x_start) * np.cos(self.angle) + (y - self.y_start) * np.sin(self.angle)\
 
+    def plot_street(self):
+        for i in range(self.n_lanes):
+            plt.plot([self.lanes[i].x_start, self.lanes[i].x_end], [self.lanes[i].y_start, self.lanes[i].y_end], 'b--')
+            print(self.lanes[i].length)
+        plt.plot([self.x_start, self.x_end], [self.y_start, self.y_end], 'r--')
         
 class Lane:
     def __init__(self, x_start, y_start, x_end, y_end):
