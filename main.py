@@ -8,9 +8,9 @@ import conf
 plt.style.use('seaborn')
 
 
-street = Street(0, 0, 1000, 0)
+street = Street(0, 0, 2000, 0)
 lanes = street.lanes
-n_vehicles = 2
+n_vehicles = 6
 
 dt = 0.1
 T = 100
@@ -20,7 +20,7 @@ vehicles_list = [Vehicle(street, lanes[0], 0, 10, dt, N+1, L=3)]
 # vehicles_list[0].c1 = 10 / 1000
 # vehicles_list[0].autonomy = 30
 # vehicles_list[0].status = [vehicles_list[0].autonomy , vehicles_list[0].c0, vehicles_list[0].c1, vehicles_list[0].x]
-[vehicles_list.append(Vehicle(street, lanes[0], vehicles_list[i].x - 10, 10, dt, N+1, L=3)) for i in range(n_vehicles-1)]
+[vehicles_list.append(Vehicle(street, lanes[0], vehicles_list[i].x - 40, 1, dt, N+1, L=3)) for i in range(n_vehicles-1)]
 
 
 def update_platoon_order(vehicles_list, prev_leader=None):
@@ -97,10 +97,14 @@ if __name__ == '__main__':
             # Calculathe the trucks visible to the lidar
             # if v.in_overtake:
             for ve in vehicles_list: 
+                # if v == vehicles_list[0] and t>100 and t<500:
+                #     v.remove_visible_truck(ve)
+                #     continue
                 if ve != v and distance(ve, v) < conf.lidar_range:
                     v.add_visible_truck(ve)
                 elif ve != v:
                     v.remove_visible_truck(ve)
+
 
             if not v.leader:
                 if v.lane == platoon_vehicles[i-1].lane:

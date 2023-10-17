@@ -14,11 +14,12 @@ class Estimator:
         self.N = N
 
         self.visible_vehicles = []
-        self.last_visible_vehicles = []
+        self.visible_vehicles_storage = []
         self.not_removed_vehicles = []
-        self.added_vehicles = []
+        self.new_vehicles = []
         self.n_other_vehicles = 6
         self.n_vehicles = 0
+        self.n_vehicles_storage = 0
         
         self.S0_hat = vehicle.S0 #np.zeros(self.n)
         self.S_hat = np.zeros((self.n, N))
@@ -58,14 +59,22 @@ class Estimator:
                 conf.sigma_v**2, 
                 conf.sigma_y**2]
         
-        for i in range(self.n_vehicles):
+        for i, v in enumerate(self.visible_vehicles_storage):
+            visibility = 1 if v in self.visible_vehicles else 0
+
             x_o_0 = self.S_sym[self.n + self.n_other_vehicles * i + 0]
             y_o_0 = self.S_sym[self.n + self.n_other_vehicles * i + 1]
             x_o_1 = x_o_0 * cas.cos(delta) + y_o_0 * cas.sin(delta) - x * cas.cos(delta) - y * cas.sin(delta)
             y_o_1 = - x_o_0 * cas.sin(delta) + y_o_0 * cas.cos(delta) + x * cas.sin(delta) - y * cas.cos(delta)
-            h_tmp.append(cas.vertcat(cas.sqrt(x_o_1**2 + y_o_1**2), cas.arctan(y_o_1 / x_o_1)))
-            R_tmp.append(conf.sigma_lidar_rho**2)
-            R_tmp.append(conf.sigma_lidar_phi**2)
+
+            h_tmp.append(visibility * cas.vertcat(cas.sqrt(x_o_1**2 + y_o_1**2),
+                                                cas.arctan(y_o_1 / x_o_1)
+                                                ))
+            
+            R_tmp.append(conf.sigma_lidar_rho**2 * visibility)
+            R_tmp.append(conf.sigma_lidar_phi**2 * visibility)
+            # R_tmp.append(conf.sigma_x_gps**2 * 0)
+            # R_tmp.append(conf.sigma_y_gps**2 * 0)
 
         self.h = self.h
         for e in h_tmp: self.h = cas.vertcat(self.h, e)
@@ -85,8 +94,8 @@ class Estimator:
                 self.vehicle.S[4],
                 -self.vehicle.S[0]*np.sin(self.vehicle.street.angle) + self.vehicle.S[1]*np.cos(self.vehicle.street.angle)]
         
-        for i in range(self.n_vehicles):
-            v = self.visible_vehicles[i]
+        for i, v in enumerate(self.visible_vehicles_storage):
+            visibility = 1 if v in self.visible_vehicles else 0
             x = v.S[0]
             y = v.S[1]
             Xf_0 = np.array([x,y,1])
@@ -99,8 +108,10 @@ class Estimator:
 
             Xf_0 = self.vehicle.M01 @ np.array([rho * np.cos(phi), rho*np.sin(phi), 1])
 
-            z_tmp.append(rho)
-            z_tmp.append(phi)
+            z_tmp.append(visibility*rho)
+            z_tmp.append(visibility*phi)
+            # z_tmp.append(0*x)
+            # z_tmp.append(0*y)
 
         z = np.array(z_tmp) + eps # Measurement Simulation
             
@@ -108,27 +119,28 @@ class Estimator:
     
     def update_vehcles_list(self):
         self.visible_vehicles = self.vehicle.trucks_visible.copy()
-        self.added_vehicles = []
-        self.not_removed_vehicles = []
 
-        for i, v in enumerate(self.visible_vehicles):
-            if v not in self.last_visible_vehicles : 
-                self.added_vehicles.append((i,v))
-        for i, v in enumerate(self.last_visible_vehicles):
-            if v in self.visible_vehicles : 
-                self.not_removed_vehicles.append((self.last_visible_vehicles.index(v),v)) 
-        self.last_visible_vehicles = self.visible_vehicles
+        self.new_vehicles = []
+        for v in self.visible_vehicles:
+            if v not in self.visible_vehicles_storage:
+                self.new_vehicles.append(v)
+        
+        for _, v in enumerate(self.visible_vehicles):
+            if v not in self.visible_vehicles_storage: 
+                self.visible_vehicles_storage.append(v)
 
         self.n_vehicles = len(self.visible_vehicles)
+        self.n_vehicles_storage = len(self.visible_vehicles_storage)
+
         self.create_sys_model()
         self.create_measurement_model()
 
     
     def run_filter(self, u, i):
-        self.S[:,i + 1] = self.vehicle.S # Save the real state
+        self.S[:,i + 1] = self.vehicle.S.copy() # Save the real state
         z = self.measure(i)
         u = [u[0], u[1]]
-        for v in self.visible_vehicles:
+        for v in self.visible_vehicles_storage:
             u.append(v.u[0])
             u.append(v.u[1])
         u = np.array(u)
@@ -136,7 +148,7 @@ class Estimator:
         nu = np.random.multivariate_normal(np.zeros(self.Q.shape[0]), self.Q)
 
         G = self.G_fun(self.S_hat[:,i], u).full()
-        A = self.A_fun(self.S_hat[:,i], u, np.zeros(2 + 2 *self.n_vehicles)).full()
+        A = self.A_fun(self.S_hat[:,i], u, np.zeros(2 + 2 *self.n_vehicles_storage)).full()
     
         # Prediction step
         self.S_hat[:,i+1] = self.f_fun(self.S_hat[:,i], u, nu).full().flatten()
@@ -146,15 +158,15 @@ class Estimator:
         H = self.H_fun(self.S_hat[:,i+1]).full()
 
         S = H @ self.P[:,:,i+1] @ H.T + self.R
-        w = self.P[:,:,i+1] @ H.T @ np.linalg.inv(S)
+        w = self.P[:,:,i+1] @ H.T @ np.linalg.pinv(S)
         self.S_hat[:,i+1] = self.S_hat[:,i+1] + (w @ (z.T - self.h_fun(self.S_hat[:,i+1]).full().flatten()))
         self.P[:,:,i+1] =  (np.eye(self.P.shape[0]) - w @ H) @ self.P[:,:,i+1]
 
     def create_sys_model(self):
 
-        S = cas.SX.sym('S_aug', self.n_other_vehicles * self.n_vehicles)
-        U = cas.SX.sym('U_aug', 2 * self.n_vehicles)
-        Nu = cas.SX.sym('Nu_aug', 2 * self.n_vehicles)
+        S = cas.SX.sym('S_aug', self.n_other_vehicles * self.n_vehicles_storage)
+        U = cas.SX.sym('U_aug', 2 * self.n_vehicles_storage)
+        Nu = cas.SX.sym('Nu_aug', 2 * self.n_vehicles_storage)
 
         self.S_sym = cas.vertcat(self.vehicle.S_sym, S)
         self.U_sym = cas.vertcat(self.vehicle.U_sym, U)
@@ -162,20 +174,23 @@ class Estimator:
     
         tmp_f = []
         Q_tmp = [conf.sigma_u**2, conf.sigma_omega**2]
-        for i in range(self.n_vehicles):
+        for i, v in enumerate(self.visible_vehicles_storage):
+            visibility = 1 #if v in self.visible_vehicles else 0
             delta_other = self.S_sym[self.n + self.n_other_vehicles * i + 2]
             alpha_other = self.S_sym[self.n + self.n_other_vehicles * i + 3]
             v_other = self.S_sym[self.n + self.n_other_vehicles * i + 4]
             a_other = self.S_sym[self.n + self.n_other_vehicles * i + 5]
             u_other = self.U_sym[2 * i + 2]  + self.Nu_sym[2 * i + 2]
             omega_other = self.U_sym[2 * i + 3] + self.Nu_sym[2 * i + 3]
-            tmp_f.append(cas.vertcat(cas.cos(delta_other) * v_other,
+            tmp_f.append(visibility*(cas.vertcat(cas.cos(delta_other) * v_other,
                                     cas.sin(delta_other) * v_other,
                                     cas.tan(alpha_other)/self.vehicle.L * v_other,
                                     omega_other,
                                     a_other,
                                     1/self.vehicle.tau * (-a_other + (u_other)))
-                                    * self.dt + self.S_sym[7 + i*self.n_other_vehicles: 7 + (i+1)*self.n_other_vehicles])
+                                    * self.dt + self.S_sym[7 + i*self.n_other_vehicles: 7 + (i+1)*self.n_other_vehicles]
+                                    )
+                        )
             
             Q_tmp.append(10 * conf.sigma_u**2)
             Q_tmp.append(10 * conf.sigma_omega**2)
@@ -185,19 +200,18 @@ class Estimator:
 
         self.Q = np.diag(Q_tmp)
 
-        slices_to_keep = np.arange(0, 7)
-        for i, _ in self.not_removed_vehicles:
-            slices_to_keep = np.append(slices_to_keep, np.arange(self.n + self.n_other_vehicles * i, self.n + self.n_other_vehicles * (i+1)))
+        # slices_to_keep = np.arange(0, 7)
+        # for i, _ in self.not_removed_vehicles:
+        #     slices_to_keep = np.append(slices_to_keep, np.arange(self.n + self.n_other_vehicles * i, self.n + self.n_other_vehicles * (i+1)))
 
-        s_tmp = np.zeros((self.n_other_vehicles * len(self.added_vehicles), self.N))
-        self.S_hat = np.concatenate([self.S_hat[slices_to_keep], s_tmp])
+        s_tmp = np.zeros((self.n_other_vehicles * len(self.new_vehicles), self.N))
+        self.S_hat = np.concatenate([self.S_hat, s_tmp])
 
-        P_tmp = np.zeros((self.n + self.n_vehicles * self.n_other_vehicles , self.n + self.n_vehicles * self.n_other_vehicles, self.N))
-        P_other = np.eye(len(self.added_vehicles) * self.n_other_vehicles) * 1e-5
-        self.P = self.P[slices_to_keep][:, slices_to_keep]
+        P_tmp = np.zeros((self.n + self.n_vehicles_storage * self.n_other_vehicles , self.n + self.n_vehicles_storage * self.n_other_vehicles, self.N))
+        P_other = np.eye(len(self.new_vehicles) * self.n_other_vehicles) * 1e-5
         for i in range(self.N):
-            P_tmp[:,:,i] = np.block([ [self.P[:,:, i], np.zeros((self.P.shape[0], len(self.added_vehicles) * self.n_other_vehicles))],
-                                    [np.zeros((self.n_other_vehicles * len(self.added_vehicles), self.P.shape[0])), P_other ] ])
+            P_tmp[:,:,i] = np.block([ [self.P[:,:, i], np.zeros((self.P.shape[0], len(self.new_vehicles) * self.n_other_vehicles))],
+                                    [np.zeros((self.n_other_vehicles * len(self.new_vehicles), self.P.shape[0])), P_other ] ])
             
         self.P = P_tmp
         
