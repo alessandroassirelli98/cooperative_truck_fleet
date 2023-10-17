@@ -8,19 +8,19 @@ import conf
 plt.style.use('seaborn')
 
 
-street = Street(0, 0, 5000, 0)
+street = Street(0, 0, 1000, 0)
 lanes = street.lanes
 n_vehicles = 2
 
 dt = 0.1
-T = 300
+T = 100
 N = int(T/dt)
 
 vehicles_list = [Vehicle(street, lanes[0], 0, 10, dt, N+1, L=3)]
 # vehicles_list[0].c1 = 10 / 1000
 # vehicles_list[0].autonomy = 30
 # vehicles_list[0].status = [vehicles_list[0].autonomy , vehicles_list[0].c0, vehicles_list[0].c1, vehicles_list[0].x]
-[vehicles_list.append(Vehicle(street, lanes[0], vehicles_list[i].x - 50, 10, dt, N+1, L=3)) for i in range(n_vehicles-1)]
+[vehicles_list.append(Vehicle(street, lanes[0], vehicles_list[i].x - 10, 10, dt, N+1, L=3)) for i in range(n_vehicles-1)]
 
 
 def update_platoon_order(vehicles_list, prev_leader=None):
@@ -89,14 +89,14 @@ if __name__ == '__main__':
         # Update the vehicles actions
         for i, v in enumerate(platoon_vehicles):
 
-            # Then compute the optimization and share back the message            
-            # if v.leader and v.schedule["overtaking"] is None and t==1:#t!=0 and t%k_optimize == 0:
-            #     v.compute_truck_scheduling() # Compute optimization
-            #     schedule_available = True
+            # # Then compute the optimization and share back the message            
+            if v.leader and v.schedule["overtaking"] is None and t==1:#t!=0 and t%k_optimize == 0:
+                v.compute_truck_scheduling() # Compute optimization
+                schedule_available = True
 
             # Calculathe the trucks visible to the lidar
             # if v.in_overtake:
-            for ve in vehicles_list:
+            for ve in vehicles_list: 
                 if ve != v and distance(ve, v) < conf.lidar_range:
                     v.add_visible_truck(ve)
                 elif ve != v:

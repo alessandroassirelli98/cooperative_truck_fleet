@@ -6,27 +6,32 @@ plt.style.use('seaborn')
 
 class Estimator:
     def __init__(self, vehicle, dt, N):
+        
         self.vehicle = vehicle
-        self.vehicles_list = []
-        self.n_vehicles = 0
 
         self.dt = dt
         self.n = 7
         self.N = N
+
+        self.visible_vehicles = []
+        self.last_visible_vehicles = []
+        self.not_removed_vehicles = []
+        self.added_vehicles = []
+        self.n_other_vehicles = 6
+        self.n_vehicles = 0
         
-        self.create_sys_model()
-        self.create_measurement_model()
-        
-        
-        S0_hat = vehicle.S0#np.zeros(self.n)
+        self.S0_hat = vehicle.S0 #np.zeros(self.n)
         self.S_hat = np.zeros((self.n, N))
         self.S = np.zeros((self.n, N))
         self.S[:,0] = vehicle.S0
         self.P = np.zeros((self.n, self.n, N))
 
+        self.create_sys_model()
+        self.create_measurement_model()
+
         # Initialization
         self.P[:,:,0] = np.eye(self.n)*1e-5
-        self.S_hat[:,0] = S0_hat
+        self.S_hat[:,0] = self.S0_hat
 
 
     def create_measurement_model(self):
@@ -36,8 +41,6 @@ class Estimator:
         alpha = self.S_sym[3]
         v1 = self.S_sym[4]
         beta = self.S_sym[6]
-        
-
 
         self.h = cas.vertcat(x, # GPS
                             y, # GPS
@@ -45,46 +48,28 @@ class Estimator:
                             alpha, # Encoder on steering wheel
                             v1, # Encoder on motor shaft
                             (- cas.sin(beta)*x + cas.cos(beta)*y), # Lane detection with cameras
-                        )
+                            )
         
-        self.R = np.diag([
-            conf.sigma_x_gps**2, 
-            conf.sigma_y_gps**2,
-            conf.sigma_delta**2, 
-            conf.sigma_alpha**2, 
-            conf.sigma_v**2, 
-            conf.sigma_y**2
-            ])
+        h_tmp = []
+        R_tmp = [conf.sigma_x_gps**2, 
+                conf.sigma_y_gps**2,
+                conf.sigma_delta**2, 
+                conf.sigma_alpha**2, 
+                conf.sigma_v**2, 
+                conf.sigma_y**2]
         
+        for i in range(self.n_vehicles):
+            x_o_0 = self.S_sym[self.n + self.n_other_vehicles * i + 0]
+            y_o_0 = self.S_sym[self.n + self.n_other_vehicles * i + 1]
+            x_o_1 = x_o_0 * cas.cos(delta) + y_o_0 * cas.sin(delta) - x * cas.cos(delta) - y * cas.sin(delta)
+            y_o_1 = - x_o_0 * cas.sin(delta) + y_o_0 * cas.cos(delta) + x * cas.sin(delta) - y * cas.cos(delta)
+            h_tmp.append(cas.vertcat(cas.sqrt(x_o_1**2 + y_o_1**2), cas.arctan(y_o_1 / x_o_1)))
+            R_tmp.append(conf.sigma_lidar_rho**2)
+            R_tmp.append(conf.sigma_lidar_phi**2)
 
-        if len(self.vehicles_list) != 0:
-            v = self.vehicles_list[0]  
-            x_t = self.S_sym[7]
-            y_t = self.S_sym[8]
-            delta = self.S_sym[2]
-            xt_1 = x_t * cas.cos(delta) + y_t * cas.sin(delta) - x * cas.cos(delta) - y * cas.sin(delta)
-            yt_1 = - x_t * cas.sin(delta) + y_t * cas.cos(delta) + x * cas.sin(delta) - y * cas.cos(delta)
-
-            self.h = cas.vertcat(self.h,
-                                cas.vertcat(
-                                    cas.sqrt(xt_1**2 + yt_1**2), # Lidar
-                                    cas.arctan(yt_1 / xt_1), # Lidar
-                                    0*x_t,
-                                    0*y_t
-                                ))
-            self.R = np.diag([
-            conf.sigma_x_gps**2, 
-            conf.sigma_y_gps**2,
-            conf.sigma_delta**2, 
-            conf.sigma_alpha**2, 
-            conf.sigma_v**2, 
-            conf.sigma_y**2,
-            conf.sigma_lidar_rho**2,
-            conf.sigma_lidar_phi**2,
-            conf.sigma_x_gps**2, 
-            conf.sigma_y_gps**2
-            ])
-
+        self.h = self.h
+        for e in h_tmp: self.h = cas.vertcat(self.h, e)
+        self.R = np.diag(R_tmp)
 
         H = cas.jacobian(self.h, self.S_sym)
         self.H_fun = cas.Function('H_fun', [self.S_sym], [H])
@@ -93,9 +78,15 @@ class Estimator:
     def measure(self, i):
 
         eps = np.random.multivariate_normal(np.zeros(self.R.shape[0]), self.R)
-
-        if len(self.vehicles_list) != 0:
-            v = self.vehicles_list[0]   
+        z_tmp = [self.vehicle.S[0],
+                self.vehicle.S[1],
+                self.vehicle.S[2],
+                self.vehicle.S[3],
+                self.vehicle.S[4],
+                -self.vehicle.S[0]*np.sin(self.vehicle.street.angle) + self.vehicle.S[1]*np.cos(self.vehicle.street.angle)]
+        
+        for i in range(self.n_vehicles):
+            v = self.visible_vehicles[i]
             x = v.S[0]
             y = v.S[1]
             Xf_0 = np.array([x,y,1])
@@ -108,31 +99,27 @@ class Estimator:
 
             Xf_0 = self.vehicle.M01 @ np.array([rho * np.cos(phi), rho*np.sin(phi), 1])
 
-            z = np.array([self.vehicle.S[0],
-                self.vehicle.S[1],
-                self.vehicle.S[2],
-                self.vehicle.S[3],
-                self.vehicle.S[4],
-                -self.vehicle.S[0]*np.sin(self.vehicle.street.angle) + self.vehicle.S[1]*np.cos(self.vehicle.street.angle),
-                rho,
-                phi,
-                x,
-                y]) + eps # Measurement Simulation
-        else:
-            z = np.array([self.vehicle.S[0],
-                    self.vehicle.S[1],
-                    self.vehicle.S[2],
-                    self.vehicle.S[3],
-                    self.vehicle.S[4],
-                    -self.vehicle.S[0]*np.sin(self.vehicle.street.angle) + self.vehicle.S[1]*np.cos(self.vehicle.street.angle),
-                    ]) + eps # Measurement Simulation
+            z_tmp.append(rho)
+            z_tmp.append(phi)
+
+        z = np.array(z_tmp) + eps # Measurement Simulation
             
         return z
     
     def update_vehcles_list(self):
-        self.vehicles_list = self.vehicle.trucks_visible
-        self.vehicles_list = self.vehicles_list
-        self.n_vehicles = len(self.vehicles_list)
+        self.visible_vehicles = self.vehicle.trucks_visible.copy()
+        self.added_vehicles = []
+        self.not_removed_vehicles = []
+
+        for i, v in enumerate(self.visible_vehicles):
+            if v not in self.last_visible_vehicles : 
+                self.added_vehicles.append((i,v))
+        for i, v in enumerate(self.last_visible_vehicles):
+            if v in self.visible_vehicles : 
+                self.not_removed_vehicles.append((self.last_visible_vehicles.index(v),v)) 
+        self.last_visible_vehicles = self.visible_vehicles
+
+        self.n_vehicles = len(self.visible_vehicles)
         self.create_sys_model()
         self.create_measurement_model()
 
@@ -140,8 +127,11 @@ class Estimator:
     def run_filter(self, u, i):
         self.S[:,i + 1] = self.vehicle.S # Save the real state
         z = self.measure(i)
-        if self.n_vehicles != 0:
-            u = cas.vertcat(u, self.vehicles_list[0].v, self.vehicles_list[0].omega)
+        u = [u[0], u[1]]
+        for v in self.visible_vehicles:
+            u.append(v.u[0])
+            u.append(v.u[1])
+        u = np.array(u)
 
         nu = np.random.multivariate_normal(np.zeros(self.Q.shape[0]), self.Q)
 
@@ -160,10 +150,9 @@ class Estimator:
         self.S_hat[:,i+1] = self.S_hat[:,i+1] + (w @ (z.T - self.h_fun(self.S_hat[:,i+1]).full().flatten()))
         self.P[:,:,i+1] =  (np.eye(self.P.shape[0]) - w @ H) @ self.P[:,:,i+1]
 
-
     def create_sys_model(self):
 
-        S = cas.SX.sym('S_aug', 4 * self.n_vehicles)
+        S = cas.SX.sym('S_aug', self.n_other_vehicles * self.n_vehicles)
         U = cas.SX.sym('U_aug', 2 * self.n_vehicles)
         Nu = cas.SX.sym('Nu_aug', 2 * self.n_vehicles)
 
@@ -171,33 +160,46 @@ class Estimator:
         self.U_sym = cas.vertcat(self.vehicle.U_sym, U)
         self.Nu_sym = cas.vertcat(self.vehicle.Nu_sym, Nu)
     
-
-        if len(self.vehicles_list) != 0:
-            delta = self.S_sym[7 + 2]
-            alpha = self.S_sym[7 + 3]
-            v = self.U_sym[2]  + self.Nu_sym[2]
-            omega = self.U_sym[3] + self.Nu_sym[3]
-
-            self.f = cas.vertcat(self.vehicle.f, 
-                                (cas.vertcat(cas.cos(delta) * v,
-                                    cas.sin(delta) * v,
-                                    cas.tan(alpha)/self.vehicle.L * v,
-                                    omega) * self.dt + self.S_sym[7:]
-                                )
-                                )
-            self.Q = np.diag([conf.sigma_u**2, conf.sigma_omega**2, 10 * conf.sigma_u**2, 10 * conf.sigma_omega**2])
-            s_ = np.zeros((4, self.N))
-            self.S_hat = np.concatenate([self.S_hat, s_])
-
-            P_tmp = np.zeros((11,11,self.N))
-            for i in range(self.N):
-                P_tmp[:,:,i] = np.block([ [self.P[:,:, i], np.zeros((7,4))], [np.zeros((4, 7)), np.eye(4) * 1e-5] ])
-            self.P = P_tmp
+        tmp_f = []
+        Q_tmp = [conf.sigma_u**2, conf.sigma_omega**2]
+        for i in range(self.n_vehicles):
+            delta_other = self.S_sym[self.n + self.n_other_vehicles * i + 2]
+            alpha_other = self.S_sym[self.n + self.n_other_vehicles * i + 3]
+            v_other = self.S_sym[self.n + self.n_other_vehicles * i + 4]
+            a_other = self.S_sym[self.n + self.n_other_vehicles * i + 5]
+            u_other = self.U_sym[2 * i + 2]  + self.Nu_sym[2 * i + 2]
+            omega_other = self.U_sym[2 * i + 3] + self.Nu_sym[2 * i + 3]
+            tmp_f.append(cas.vertcat(cas.cos(delta_other) * v_other,
+                                    cas.sin(delta_other) * v_other,
+                                    cas.tan(alpha_other)/self.vehicle.L * v_other,
+                                    omega_other,
+                                    a_other,
+                                    1/self.vehicle.tau * (-a_other + (u_other)))
+                                    * self.dt + self.S_sym[7 + i*self.n_other_vehicles: 7 + (i+1)*self.n_other_vehicles])
             
+            Q_tmp.append(10 * conf.sigma_u**2)
+            Q_tmp.append(10 * conf.sigma_omega**2)
+
+        self.f = self.vehicle.f
+        for e in tmp_f: self.f = cas.vertcat(self.f, e)
+
+        self.Q = np.diag(Q_tmp)
+
+        slices_to_keep = np.arange(0, 7)
+        for i, _ in self.not_removed_vehicles:
+            slices_to_keep = np.append(slices_to_keep, np.arange(self.n + self.n_other_vehicles * i, self.n + self.n_other_vehicles * (i+1)))
+
+        s_tmp = np.zeros((self.n_other_vehicles * len(self.added_vehicles), self.N))
+        self.S_hat = np.concatenate([self.S_hat[slices_to_keep], s_tmp])
+
+        P_tmp = np.zeros((self.n + self.n_vehicles * self.n_other_vehicles , self.n + self.n_vehicles * self.n_other_vehicles, self.N))
+        P_other = np.eye(len(self.added_vehicles) * self.n_other_vehicles) * 1e-5
+        self.P = self.P[slices_to_keep][:, slices_to_keep]
+        for i in range(self.N):
+            P_tmp[:,:,i] = np.block([ [self.P[:,:, i], np.zeros((self.P.shape[0], len(self.added_vehicles) * self.n_other_vehicles))],
+                                    [np.zeros((self.n_other_vehicles * len(self.added_vehicles), self.P.shape[0])), P_other ] ])
             
-        else:
-            self.f = self.vehicle.f
-            self.Q = np.diag([conf.sigma_u**2, conf.sigma_omega**2])
+        self.P = P_tmp
         
         
         A = cas.jacobian(self.f, self.S_sym)

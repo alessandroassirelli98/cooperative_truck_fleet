@@ -6,7 +6,6 @@ from street import Street, Lane
 from pid import PID
 from ppc import PPC
 from estimator import Estimator
-from surrounding_estimator import SurroundingEstimator
 import casadi as cas
 
 class Vehicle:
@@ -14,13 +13,13 @@ class Vehicle:
         self.pid_steer = PID(kp=conf.kp_pos, kd=conf.kd_pos, ki=conf.ki_pos, integral_sat=conf.v_max)
         self.pid_vel = PID(kp=conf.kp_vel, kd=conf.kd_vel, ki=conf.ki_vel, integral_sat=conf.v_max)
         
-        
         self.steer_control = PPC()
-        self.steer_control.lookAheadDistance = 50
+        self.steer_control.lookAheadDistance = 30
 
         self.in_overtake = False
         self.leader = False
         self.init = False
+        self.stop = False
         self.cnt = 0
 
         self.dt = dt
@@ -49,17 +48,11 @@ class Vehicle:
         self.v_max = conf.v_max
         self.a_max = conf.a_max
 
-        
-        
-
         # The nonlinear model (Obtained by Euler discretization)
         self.creta_sys_model()
         self.update_rotation_matrices()
 
         self.estimator = Estimator(self, dt, N)
-
-
-        
         
         self.e1 = 0 
 
@@ -134,56 +127,61 @@ class Vehicle:
             
             last_leader = self.schedule["last_leader"] if self.schedule["leader"] == self else self.schedule["leader"]
             if last_leader is not None:
-                v_leader = last_leader.v
-                x_leader = last_leader.x
 
-                if self.x < x_leader + last_leader.r + last_leader.h_spacing * v_leader:
-                    self.lane = self.street.lanes[1]
-                    beta = self.S[6]
-                    x_target = self.x + self.street.lane_width
-                    y_target = self.street.lane_width/2
-                    self.v_des = self.v_max
-                    self.path = np.array([[self.x, self.y], 
-                                    [x_target, y_target], 
-                                    [self.lane.x_end, self.lane.y_end]]) # Change lane
-                    self.in_overtake = True
-                    self.schedule["overtaking"] = self
+                self.lane = self.street.lanes[1]
+                x_target = self.x + self.street.lane_width
+                y_target = self.street.lane_width/2
+                self.v_des = self.v_max
+                self.path = np.array([[self.x, self.y], 
+                                [x_target, y_target], 
+                                [self.lane.x_end, self.lane.y_end]]) # Change lane
+                self.in_overtake = True
+                self.schedule["overtaking"] = self
 
-                else: # When the vehicle is in front of the leader go back to lane 0
-                    self.lane = self.street.lanes[0]
-                    x_target = self.x + self.street.lane_width
-                    y_target = self.lane.y_end
-                    self.path = np.array([[self.x, self.y], 
-                                    [x_target, y_target], 
-                                    [self.lane.x_end, self.lane.y_end]]) # Change lane
+                if last_leader in self.estimator.visible_vehicles:
+                    idx = self.estimator.visible_vehicles.index(last_leader)
+                    v_leader = last_leader.v #self.estimator.S_hat[self.estimator.n + self.estimator.n_other_vehicles * idx + 5, self.cnt]
+                    x_leader = last_leader.x #self.estimator.S_hat[self.estimator.n + self.estimator.n_other_vehicles * idx, self.cnt]
 
-                    self.v_des = 10 
-                    self.in_overtake = False
-                    self.schedule["overtaking"] = None
+                    if self.x > x_leader + last_leader.r + last_leader.h_spacing * v_leader: # When the vehicle is in front of the leader go back to lane 0
+                        self.lane = self.street.lanes[0]
+                        x_target = self.x + self.street.lane_width
+                        y_target = self.lane.y_end
+                        self.path = np.array([[self.x, self.y], 
+                                        [x_target, y_target], 
+                                        [self.lane.x_end, self.lane.y_end]]) # Change lane
 
+                        self.v_des = 10 
+                        self.in_overtake = False
+                        self.schedule["overtaking"] = None
                 
+
     def update(self, front_vehicle = None, can_talk = False):
-        if self.schedule["overtaking"] == self:
-            self.in_overtake = True        
         
-        if not self.leader and not self.in_overtake and front_vehicle:
-            self.track_front_vehicle(front_vehicle, can_talk)   
+        if not self.stop:
+            if self.schedule["overtaking"] == self:
+                self.in_overtake = True        
+            
+            if not self.leader and not self.in_overtake and front_vehicle:
+                self.track_front_vehicle(front_vehicle, can_talk)   
 
-        elif self.in_overtake:
-            self.overtake()
-            self.u_fwd = self.pid_vel.compute(self.v_des - self.v, self.dt)
+            elif self.in_overtake:
+                self.overtake()
+                self.u_fwd = self.pid_vel.compute(self.v_des - self.v, self.dt)
 
-        else:    
-            self.u_fwd = self.pid_vel.compute(self.v_des - self.v, self.dt)
+            else:    
+                self.u_fwd = self.pid_vel.compute(self.v_des - self.v, self.dt)
+
+        # if np.sqrt((self.path[-1][0] - self.x)**2 + (self.path[-1][1] - self.y)**2) < conf.PATH_TOL:
+        #     self.u_fwd = self.pid_vel.compute(0 - self.v, self.dt)
+        #     self.stop = True
             
 
         xy_position = np.array([self.x, self.y])
         alpha_des = self.steer_control.ComputeSteeringAngle(self.path, xy_position, self.delta, self.L)
         self.omega = self.pid_steer.compute(alpha_des - self.alpha, self.dt)  # Compute steering angle velocity
         
-
         self.u = np.array([self.u_fwd, self.omega])
-
         self.estimator.run_filter(self.u, self.cnt)
         self.update_rotation_matrices()
 
@@ -206,7 +204,6 @@ class Vehicle:
         self.platoon_status[self] = self.status
         
         self.log_u.append(self.u)
-        # self.log_u_unc.append(self.u_unc)
         self.log_s.append(self.s)
         self.log_x.append(self.x)
         self.log_y.append(self.y)
@@ -354,14 +351,49 @@ class Vehicle:
             self.set_schedule(schedule)
 
     def update_overtaking(self):
-
         for v in without_keys(self.schedule, ["last_leader", "leader", "overtaking"]):
             if self.schedule[v][0] is not None and self.schedule["overtaking"] is None:
                 if  (self.platoon_status[v][3] - self.xs_schedule[v]) > self.schedule[v][0] - 1e-3: 
                     self.schedule["overtaking"] = v
                     del self.schedule[v]
                     break
-                
+        
+    def set_schedule(self, schedule):
+        self.schedule.update(schedule)
+
+    def set_leader(self, last_leader = None):
+        self.leader = True
+        self.schedule["leader"] = self
+        if last_leader is not None:
+            self.schedule["last_leader"] = last_leader
+
+    def unset_leader(self):
+        self.leader = False
+        self.schedule = OrderedDict()
+        self.schedule["leader"] = None
+        self.schedule["last_leader"] = None
+        self.schedule["overtaking"] = None
+
+    def update_rotation_matrices(self):
+
+        self.M01 = np.array([[np.cos(self.S[2]), -np.sin(self.S[2]), self.S[0]],
+                    [np.sin(self.S[2]), np.cos(self.S[2]), self.S[1]],
+                    [0,0,1]]
+                )
+        self.M10 = np.array([[np.cos(self.S[2]), np.sin(self.S[2]), - self.S [0] * np.cos(self.S[2]) - self.S[1] * np.sin(self.S[2])],
+                    [-np.sin(self.S[2]), np.cos(self.S[2]),- self.S[1] * np.cos(self.S[2]) + self.S[0] * np.sin(self.S[2])],
+                     [0,0,1]]
+                )
+    
+        # self.M01_hat = np.array([[np.cos(self.estimator.S_hat[2]), -np.sin(self.estimator.S_hat[2]), self.estimator.S_hat[0]],
+        #             [np.sin(self.estimator.S_hat[2]), np.cos(self.estimator.S_hat[2]), self.estimator.S_hat[1]],
+        #             [0,0,1]]
+        #         )
+        # self.M10_hat = np.array([[np.cos(self.estimator.S_hat[2]), np.sin(self.estimator.S_hat[2]), - self.estimator.S_hat [0] * np.cos(self.estimator.S_hat[2]) - self.estimator.S_hat[1] * np.sin(self.estimator.S_hat[2])],
+        #             [-np.sin(self.estimator.S_hat[2]), np.cos(self.estimator.S_hat[2]),- self.estimator.S_hat[1] * np.cos(self.estimator.S_hat[2]) + self.estimator.S_hat[0] * np.sin(self.estimator.S_hat[2])],
+        #              [0,0,1]]
+        #         )
+
     def creta_sys_model(self):
         # Model
         # The model is expressed in the street reference frame, where the x axis is the street axis
@@ -396,41 +428,6 @@ class Vehicle:
                     0) * self.dt + self.S_sym
         
         self.f_fun = cas.Function('f_fun', [self.S_sym, self.U_sym, self.Nu_sym], [self.f])
-
-    def update_rotation_matrices(self):
-        self.M01 = np.array([[np.cos(self.S[2]), -np.sin(self.S[2]), self.S[0]],
-                    [np.sin(self.S[2]), np.cos(self.S[2]), self.S[1]],
-                    [0,0,1]]
-                )
-        self.M10 = np.array([[np.cos(self.S[2]), np.sin(self.S[2]), - self.S [0] * np.cos(self.S[2]) - self.S[1] * np.sin(self.S[2])],
-                    [-np.sin(self.S[2]), np.cos(self.S[2]),- self.S[1] * np.cos(self.S[2]) + self.S[0] * np.sin(self.S[2])],
-                     [0,0,1]]
-                )
-    
-        # self.M01_hat = np.array([[np.cos(self.estimator.S_hat[2]), -np.sin(self.estimator.S_hat[2]), self.estimator.S_hat[0]],
-        #             [np.sin(self.estimator.S_hat[2]), np.cos(self.estimator.S_hat[2]), self.estimator.S_hat[1]],
-        #             [0,0,1]]
-        #         )
-        # self.M10_hat = np.array([[np.cos(self.estimator.S_hat[2]), np.sin(self.estimator.S_hat[2]), - self.estimator.S_hat [0] * np.cos(self.estimator.S_hat[2]) - self.estimator.S_hat[1] * np.sin(self.estimator.S_hat[2])],
-        #             [-np.sin(self.estimator.S_hat[2]), np.cos(self.estimator.S_hat[2]),- self.estimator.S_hat[1] * np.cos(self.estimator.S_hat[2]) + self.estimator.S_hat[0] * np.sin(self.estimator.S_hat[2])],
-        #              [0,0,1]]
-        #         )
-        
-    def set_schedule(self, schedule):
-        self.schedule.update(schedule)
-
-    def set_leader(self, last_leader = None):
-        self.leader = True
-        self.schedule["leader"] = self
-        if last_leader is not None:
-            self.schedule["last_leader"] = last_leader
-
-    def unset_leader(self):
-        self.leader = False
-        self.schedule = OrderedDict()
-        self.schedule["leader"] = None
-        self.schedule["last_leader"] = None
-        self.schedule["overtaking"] = None
 
 def without_keys(d, keys):
     return {x: d[x] for x in d if x not in keys}

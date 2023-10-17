@@ -25,7 +25,7 @@ a_max = 60
 
 comm_range = 100000
 radar_range = 50000
-lidar_range = 500
+lidar_range = 50
 
 P_gps = 0.1
 P_radar = 0.1
@@ -46,3 +46,5 @@ sigma_lidar_phi = 1e-1 * 1e-1
 
 sigma_u = 1e0
 sigma_omega = 1e-1
+
+PATH_TOL = 10
