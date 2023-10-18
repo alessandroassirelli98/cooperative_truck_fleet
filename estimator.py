@@ -31,7 +31,7 @@ class Estimator:
         self.create_measurement_model()
 
         # Initialization
-        self.P[:,:,0] = np.eye(self.n)*1e-5
+        self.P[:,:,0] = np.eye(self.n)*1e-3
         self.S_hat[:,0] = self.S0_hat
 
 
@@ -68,8 +68,7 @@ class Estimator:
             y_o_1 = - x_o_0 * cas.sin(delta) + y_o_0 * cas.cos(delta) + x * cas.sin(delta) - y * cas.cos(delta)
 
             h_tmp.append(visibility * cas.vertcat(cas.sqrt(x_o_1**2 + y_o_1**2),
-                                                cas.arctan(y_o_1 / x_o_1)
-                                                ))
+                                                cas.arctan(y_o_1 / x_o_1)))#,x_o_0,y_o_0))
             
             R_tmp.append(conf.sigma_lidar_rho**2 * visibility)
             R_tmp.append(conf.sigma_lidar_phi**2 * visibility)
@@ -110,8 +109,8 @@ class Estimator:
 
             z_tmp.append(visibility*rho)
             z_tmp.append(visibility*phi)
-            # z_tmp.append(0*x)
-            # z_tmp.append(0*y)
+            # z_tmp.append(x)
+            # z_tmp.append(y)
 
         z = np.array(z_tmp) + eps # Measurement Simulation
             
@@ -208,7 +207,7 @@ class Estimator:
         self.S_hat = np.concatenate([self.S_hat, s_tmp])
 
         P_tmp = np.zeros((self.n + self.n_vehicles_storage * self.n_other_vehicles , self.n + self.n_vehicles_storage * self.n_other_vehicles, self.N))
-        P_other = np.eye(len(self.new_vehicles) * self.n_other_vehicles) * 1e-5
+        P_other = np.eye(len(self.new_vehicles) * self.n_other_vehicles) * 1e1
         for i in range(self.N):
             P_tmp[:,:,i] = np.block([ [self.P[:,:, i], np.zeros((self.P.shape[0], len(self.new_vehicles) * self.n_other_vehicles))],
                                     [np.zeros((self.n_other_vehicles * len(self.new_vehicles), self.P.shape[0])), P_other ] ])

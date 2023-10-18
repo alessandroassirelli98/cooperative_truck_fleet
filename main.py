@@ -10,17 +10,17 @@ plt.style.use('seaborn')
 
 street = Street(0, 0, 2000, 0)
 lanes = street.lanes
-n_vehicles = 6
+n_vehicles = 5
 
 dt = 0.1
-T = 100
+T = 200
 N = int(T/dt)
 
 vehicles_list = [Vehicle(street, lanes[0], 0, 10, dt, N+1, L=3)]
 # vehicles_list[0].c1 = 10 / 1000
 # vehicles_list[0].autonomy = 30
 # vehicles_list[0].status = [vehicles_list[0].autonomy , vehicles_list[0].c0, vehicles_list[0].c1, vehicles_list[0].x]
-[vehicles_list.append(Vehicle(street, lanes[0], vehicles_list[i].x - 40, 1, dt, N+1, L=3)) for i in range(n_vehicles-1)]
+[vehicles_list.append(Vehicle(street, lanes[0], vehicles_list[i].x - 40, 10, dt, N+1, L=3)) for i in range(n_vehicles-1)]
 
 
 def update_platoon_order(vehicles_list, prev_leader=None):

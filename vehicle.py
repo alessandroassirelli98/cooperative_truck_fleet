@@ -95,16 +95,16 @@ class Vehicle:
     def track_front_vehicle(self, front_vehicle, can_talk = False):
 
         # If they can talk use the informations from the front vehicle
-        if can_talk:
-            self.e1 = front_vehicle.x - self.x - self.r - self.h_spacing * self.v
-            self.e2 = front_vehicle.v - self.v - self.h_spacing * self.a
-            self.e3 = front_vehicle.a - self.a - (1/conf.tau * (- self.a + self.u_fwd) * self.h_spacing)
+        # if can_talk:
+        self.e1 = front_vehicle.x - self.x - self.r - self.h_spacing * self.v
+        self.e2 = front_vehicle.v - self.v - self.h_spacing * self.a
+        self.e3 = front_vehicle.a - self.a - (1/conf.tau * (- self.a + self.u_fwd) * self.h_spacing)
 
-            self.u_fwd += 1/self.h_spacing * ( - self.u_fwd + 
-                                  conf.kp*self.e1 + 
-                                  conf.kd*self.e2 + 
-                                  conf.kdd*self.e3 + 
-                                  front_vehicle.u_fwd) * self.dt
+        self.u_fwd += 1/self.h_spacing * ( - self.u_fwd + 
+                                conf.kp*self.e1 + 
+                                conf.kd*self.e2 + 
+                                conf.kdd*self.e3 + 
+                                front_vehicle.u_fwd) * self.dt
             
         # If they cannot communicate, and the radar sees the front vehicle
         # the follower vehicle takes a measurement
@@ -117,8 +117,8 @@ class Vehicle:
 
         # If they cannot communicate, and the radar does not see the front vehicle
         # Go with the actual speed
-        else: 
-            self.v_des = self.v
+        # else: 
+        #     self.v_des = self.v
 
     def set_desired_velocities(self, v_des):
         self.u_fwd = self.pid_vel.compute(v_des - self.v, self.dt)
