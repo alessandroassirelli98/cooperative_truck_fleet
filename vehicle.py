@@ -137,23 +137,26 @@ class Vehicle:
                                 [self.lane.x_end, self.lane.y_end]]) # Change lane
                 self.in_overtake = True
                 self.schedule["overtaking"] = self
+                
+                x_vehicles = []
+                for i, v in enumerate(self.estimator.visible_vehicles_storage):
+                    x_idx = self.estimator.n + self.estimator.n_other_vehicles * i
+                    if np.sqrt(self.estimator.P[x_idx,x_idx, self.cnt]) < 5:
+                        x_vehicles.append(self.estimator.S_hat[x_idx, self.cnt])
 
-                # if last_leader in self.estimator.visible_vehicles:
-                #     idx = self.estimator.visible_vehicles.index(last_leader)
-                v_leader = last_leader.v #self.estimator.S_hat[self.estimator.n + self.estimator.n_other_vehicles * idx + 5, self.cnt]
-                x_leader = last_leader.x #self.estimator.S_hat[self.estimator.n + self.estimator.n_other_vehicles * idx, self.cnt]
+                if len(x_vehicles) != 0:
+                    x_leader = max(x_vehicles)
+                    if self.x > x_leader + last_leader.r + last_leader.h_spacing * 10: # When the vehicle is in front of the leader go back to lane 0
+                        self.lane = self.street.lanes[0]
+                        x_target = self.x + self.street.lane_width
+                        y_target = self.lane.y_end
+                        self.path = np.array([[self.x, self.y], 
+                                        [x_target, y_target], 
+                                        [self.lane.x_end, self.lane.y_end]]) # Change lane
 
-                if self.x > x_leader + last_leader.r + last_leader.h_spacing * v_leader: # When the vehicle is in front of the leader go back to lane 0
-                    self.lane = self.street.lanes[0]
-                    x_target = self.x + self.street.lane_width
-                    y_target = self.lane.y_end
-                    self.path = np.array([[self.x, self.y], 
-                                    [x_target, y_target], 
-                                    [self.lane.x_end, self.lane.y_end]]) # Change lane
-
-                    self.v_des = 10 
-                    self.in_overtake = False
-                    self.schedule["overtaking"] = None
+                        self.v_des = 10 
+                        self.in_overtake = False
+                        self.schedule["overtaking"] = None
                 
 
     def update(self, front_vehicle = None, can_talk = False):

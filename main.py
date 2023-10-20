@@ -8,7 +8,7 @@ import conf
 plt.style.use('seaborn')
 
 
-street = Street(0, 0, 2000, 0)
+street = Street(0, 0, 2500, 0)
 lanes = street.lanes
 n_vehicles = 5
 
@@ -97,14 +97,10 @@ if __name__ == '__main__':
             # Calculathe the trucks visible to the lidar
             # if v.in_overtake:
             for ve in vehicles_list: 
-                # if v == vehicles_list[0] and t>100 and t<500:
-                #     v.remove_visible_truck(ve)
-                #     continue
                 if ve != v and distance(ve, v) < conf.lidar_range:
                     v.add_visible_truck(ve)
                 elif ve != v:
                     v.remove_visible_truck(ve)
-
 
             if not v.leader:
                 if v.lane == platoon_vehicles[i-1].lane:
